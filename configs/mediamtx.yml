@@ -1,0 +1,6 @@
+# MediaMTX v1.20.0 配置
+# 录像存储到 /recordings，按 路径名/日期 分层
+paths:
+  all_others:
+    record: true
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
