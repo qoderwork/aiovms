@@ -27,7 +27,6 @@ import (
 	"aiovms/pkg/crypto"
 	"aiovms/pkg/database"
 	"aiovms/pkg/logger"
-	"aiovms/pkg/redis"
 )
 
 // @title AIO VMS API
@@ -93,16 +92,6 @@ func main() {
 	// 3b. Init audit logger
 	audit.Init(db)
 
-	// 4. Initialize Redis (for NMS status sync)
-	redisCfg := redis.Config{
-		Host: cfg.Redis.Host, Port: cfg.Redis.Port,
-		Password: cfg.Redis.Password, DB: cfg.Redis.DB,
-	}
-	if err := redis.Init(redisCfg); err != nil {
-		logger.Warnf("redis init: %v (status sync disabled)", err)
-	}
-	defer redis.Close()
-
 	// 5. Initialize crypto (camera password encryption) — fail-fast on missing key.
 	if err := crypto.Init(); err != nil {
 		logger.Fatalf("crypto init: %v (VMS_ENCRYPTION_KEY must be set to a 32+ byte string)", err)
@@ -149,7 +138,7 @@ func main() {
 	router.Use(gin.Recovery(), middleware.CORSMiddleware(cfg.CORS.AllowedOrigins))
 
 	router.GET("/healthz", func(c *gin.Context) {
-		// Liveness: process + DB + Redis connectivity.
+		// Liveness: process + DB connectivity.
 		// In production, error details are logged but not returned to the caller.
 		if sqlDB, err := db.DB(); err == nil {
 			if err := sqlDB.Ping(); err != nil {
@@ -159,11 +148,6 @@ func main() {
 			}
 		} else {
 			logger.Errorf("healthz: db handle: %v", err)
-			c.JSON(503, gin.H{"status": "unhealthy"})
-			return
-		}
-		if err := redis.Ping(); err != nil {
-			logger.Errorf("healthz: redis ping: %v", err)
 			c.JSON(503, gin.H{"status": "unhealthy"})
 			return
 		}

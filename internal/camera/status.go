@@ -1,33 +1,20 @@
 package camera
 
 import (
-	"context"
-	"encoding/json"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
 	"aiovms/pkg/logger"
-	pkgredis "aiovms/pkg/redis"
 )
 
 const (
-	statusChannel  = "vms:camera:status"
 	statusInterval = 30 * time.Second
 )
 
-// StatusMessage is published to Redis when camera status changes.
-type StatusMessage struct {
-	CameraID  string `json:"camera_id"`
-	LicenseID int64  `json:"license_id"`
-	OldStatus string `json:"old_status"`
-	NewStatus string `json:"new_status"`
-	Timestamp string `json:"timestamp"`
-}
-
 // StatusChecker periodically pings camera IPs and updates their online/offline status.
-// Status changes are published to Redis for Java NMS to consume.
+// NMS queries camera status from DB directly.
 type StatusChecker struct {
 	repo     Repository
 	stopCh   chan struct{}
@@ -77,28 +64,7 @@ func (sc *StatusChecker) checkAll() {
 		if oldStatus != newStatus {
 			logger.Infof("camera %s status changed: %s → %s", cam.ID, oldStatus, newStatus)
 			_ = sc.repo.UpdateStatus(cam.ID, newStatus)
-
-			// Publish to Redis
-			sc.publish(cam.ID, cam.LicenseID, oldStatus, newStatus)
 		}
-	}
-}
-
-func (sc *StatusChecker) publish(cameraID string, licenseID int64, oldStatus, newStatus string) {
-	msg := StatusMessage{
-		CameraID:  cameraID,
-		LicenseID: licenseID,
-		OldStatus: oldStatus,
-		NewStatus: newStatus,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-	payload, _ := json.Marshal(msg)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	if err := pkgredis.Publish(ctx, statusChannel, string(payload)); err != nil {
-		logger.Debugf("status checker: redis publish failed: %v", err)
 	}
 }
 
