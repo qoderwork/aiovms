@@ -1,4 +1,16 @@
 # MediaMTX v1.20.0 配置
+# API 默认关闭，需显式开启（默认端口 9997）
+api: yes
+# 内部网络调用，允许所有 IP 无密码访问 API
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass: ""
+    permissions:
+      - action: publish
+      - action: read
+      - action: api
+      - action: metrics
 # 录像存储到 /recordings，按 路径名/日期 分层
 paths:
   all_others:

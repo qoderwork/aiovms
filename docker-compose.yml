@@ -34,13 +34,14 @@ services:
       TZ: Asia/Shanghai
     ports:
       - "8554:8554"   # RTSP
-      - "8888:8888"   # HTTP API
+      - "8888:8888"   # HLS
       - "1935:1935"   # RTMP
+      - "9997:9997"   # HTTP API
     volumes:
       - ./data/mediamtx-recordings:/recordings
       - ./configs/mediamtx.yml:/mediamtx.yml:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-check-certificate -qO- http://127.0.0.1:8888/v3/paths/list > /dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- http://127.0.0.1:9997/v3/config/global/get > /dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

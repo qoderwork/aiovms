@@ -13,7 +13,7 @@ database:
   log_level: info
 
 mediamtx:
-  url: "http://mediamtx:8888"
+  url: "http://aiovms-mediamtx:9997"
 
 recording:
   path: "/recordings"
