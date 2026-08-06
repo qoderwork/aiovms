@@ -27,7 +27,8 @@ services:
 
   # MediaMTX 流媒体服务器
   mediamtx:
-    image: bluenviron/mediamtx:1.20.0
+    #image: bluenviron/mediamtx:1.20.0
+    image: bluenviron/mediamtx:1.20.0-ffmpeg
     container_name: aiovms-mediamtx
     restart: unless-stopped
     environment:
@@ -57,7 +58,7 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      VMS_ENCRYPTION_KEY: "change-me-to-a-32-byte-strong-secret-key-123"  # 生产环境需替换为强密钥（≥32字节）
+      VMS_ENCRYPTION_KEY: "e587e6f46b4dd28a58a8367c8f90d424"  # 生产环境需替换为强密钥
     ports:
       - "8081:8081"
     volumes:
