@@ -15,6 +15,9 @@ type Repository interface {
 	FindAllByTenant(tenantID int64) ([]model.Camera, error)
 	FindAll() ([]model.Camera, error)
 	UpdateStatus(id string, status string) error
+	ExistsByIPPort(tenantID int64, ip string, port int, excludeID string) (bool, error)
+	ExistsByName(tenantID int64, name string, excludeID string) (bool, error)
+	ExistsByStreamURL(tenantID int64, streamURL string, excludeID string) (bool, error)
 }
 
 type repository struct {
@@ -64,4 +67,34 @@ func (r *repository) FindAllByTenant(tenantID int64) ([]model.Camera, error) {
 
 func (r *repository) UpdateStatus(id string, status string) error {
 	return r.db.Model(&model.Camera{}).Where("id = ?", id).Update("status", status).Error
+}
+
+func (r *repository) ExistsByIPPort(tenantID int64, ip string, port int, excludeID string) (bool, error) {
+	var count int64
+	q := r.db.Model(&model.Camera{}).Where("license_id = ? AND ip = ? AND port = ?", tenantID, ip, port)
+	if excludeID != "" {
+		q = q.Where("id != ?", excludeID)
+	}
+	err := q.Count(&count).Error
+	return count > 0, err
+}
+
+func (r *repository) ExistsByName(tenantID int64, name string, excludeID string) (bool, error) {
+	var count int64
+	q := r.db.Model(&model.Camera{}).Where("license_id = ? AND name = ?", tenantID, name)
+	if excludeID != "" {
+		q = q.Where("id != ?", excludeID)
+	}
+	err := q.Count(&count).Error
+	return count > 0, err
+}
+
+func (r *repository) ExistsByStreamURL(tenantID int64, streamURL string, excludeID string) (bool, error) {
+	var count int64
+	q := r.db.Model(&model.Camera{}).Where("license_id = ? AND stream_url = ?", tenantID, streamURL)
+	if excludeID != "" {
+		q = q.Where("id != ?", excludeID)
+	}
+	err := q.Count(&count).Error
+	return count > 0, err
 }

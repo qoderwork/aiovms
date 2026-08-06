@@ -11,7 +11,7 @@ import (
 	"aiovms/pkg/logger"
 )
 
-// Client provides a Go client for MediaMTX v3 HTTP API (v1.19.3).
+// Client provides a Go client for MediaMTX v3 HTTP API (v1.20.0).
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
@@ -30,7 +30,7 @@ func NewClient(baseURL string) *Client {
 // AddPath registers a new RTSP source path in MediaMTX.
 func (c *Client) AddPath(name string, cfg PathConfig) error {
 	body, _ := json.Marshal(cfg)
-	url := fmt.Sprintf("%s/v3/config/paths/%s", c.baseURL, name)
+	url := fmt.Sprintf("%s/v3/config/paths/add/%s", c.baseURL, name)
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	return c.do(req)
@@ -38,7 +38,7 @@ func (c *Client) AddPath(name string, cfg PathConfig) error {
 
 // DeletePath removes a path from MediaMTX.
 func (c *Client) DeletePath(name string) error {
-	url := fmt.Sprintf("%s/v3/config/paths/%s", c.baseURL, name)
+	url := fmt.Sprintf("%s/v3/config/paths/delete/%s", c.baseURL, name)
 	req, _ := http.NewRequest("DELETE", url, nil)
 	return c.do(req)
 }
@@ -46,15 +46,15 @@ func (c *Client) DeletePath(name string) error {
 // PatchPath partially updates a path config (e.g. enable/disable recording).
 func (c *Client) PatchPath(name string, patch map[string]any) error {
 	body, _ := json.Marshal(patch)
-	url := fmt.Sprintf("%s/v3/config/paths/%s", c.baseURL, name)
+	url := fmt.Sprintf("%s/v3/config/paths/patch/%s", c.baseURL, name)
 	req, _ := http.NewRequest("PATCH", url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	return c.do(req)
 }
 
-// ListPaths returns all registered paths from MediaMTX.
+// ListPaths returns all runtime path states from MediaMTX.
 func (c *Client) ListPaths() ([]PathInfo, error) {
-	url := fmt.Sprintf("%s/v3/config/paths/list", c.baseURL)
+	url := fmt.Sprintf("%s/v3/paths/list", c.baseURL)
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("list paths: %w", err)

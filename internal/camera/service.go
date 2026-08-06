@@ -3,6 +3,8 @@ package camera
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -74,6 +76,28 @@ func (s *service) List(ctx context.Context, tenantID int64, query string, page, 
 }
 
 func (s *service) Create(ctx context.Context, cam *model.Camera) error {
+	if err := validateCamera(cam); err != nil {
+		return err
+	}
+
+	if exists, err := s.repo.ExistsByName(cam.LicenseID, cam.Name, ""); err != nil {
+		return apperror.Wrap(err, 50000, 500, "failed to check camera duplicate")
+	} else if exists {
+		return apperror.ErrConflict.WithMessage("camera name already exists")
+	}
+
+	if exists, err := s.repo.ExistsByIPPort(cam.LicenseID, cam.IP, cam.Port, ""); err != nil {
+		return apperror.Wrap(err, 50000, 500, "failed to check camera duplicate")
+	} else if exists {
+		return apperror.ErrConflict.WithMessage("camera with same IP and port already exists")
+	}
+
+	if exists, err := s.repo.ExistsByStreamURL(cam.LicenseID, cam.StreamURL, ""); err != nil {
+		return apperror.Wrap(err, 50000, 500, "failed to check camera duplicate")
+	} else if exists {
+		return apperror.ErrConflict.WithMessage("camera stream_url already exists")
+	}
+
 	cam.ID = uuid.NewString()
 	cam.MediaMTXPath = fmt.Sprintf("cam-%s", cam.ID[:8])
 
@@ -103,6 +127,7 @@ func (s *service) Create(ctx context.Context, cam *model.Camera) error {
 	}); err != nil {
 		logger.Errorf("mediamtx register failed for camera %s: %v", cam.ID, err)
 		_ = s.repo.UpdateStatus(cam.ID, "error")
+		return apperror.Wrap(err, 50301, 503, "failed to register camera to mediamtx")
 	}
 
 	return nil
@@ -117,9 +142,31 @@ func (s *service) Get(ctx context.Context, id string) (*model.Camera, error) {
 }
 
 func (s *service) Update(ctx context.Context, id string, cam *model.Camera) error {
+	if err := validateCamera(cam); err != nil {
+		return err
+	}
+
 	existing, err := s.repo.FindByID(id)
 	if err != nil {
 		return apperror.ErrCameraNotFound
+	}
+
+	if exists, err := s.repo.ExistsByName(existing.LicenseID, cam.Name, id); err != nil {
+		return apperror.Wrap(err, 50000, 500, "failed to check camera duplicate")
+	} else if exists {
+		return apperror.ErrConflict.WithMessage("camera name already exists")
+	}
+
+	if exists, err := s.repo.ExistsByIPPort(existing.LicenseID, cam.IP, cam.Port, id); err != nil {
+		return apperror.Wrap(err, 50000, 500, "failed to check camera duplicate")
+	} else if exists {
+		return apperror.ErrConflict.WithMessage("camera with same IP and port already exists")
+	}
+
+	if exists, err := s.repo.ExistsByStreamURL(existing.LicenseID, cam.StreamURL, id); err != nil {
+		return apperror.Wrap(err, 50000, 500, "failed to check camera duplicate")
+	} else if exists {
+		return apperror.ErrConflict.WithMessage("camera stream_url already exists")
 	}
 
 	existing.Name = cam.Name
@@ -147,6 +194,7 @@ func (s *service) Update(ctx context.Context, id string, cam *model.Camera) erro
 		SourceOnDemand: true,
 	}); err != nil {
 		logger.Errorf("mediamtx re-register failed for camera %s: %v", id, err)
+		return apperror.Wrap(err, 50301, 503, "failed to re-register camera to mediamtx")
 	}
 
 	return nil
@@ -237,4 +285,30 @@ func (s *service) ListStatuses(ctx context.Context) ([]CameraStatus, error) {
 		})
 	}
 	return out, nil
+}
+
+// validateCamera validates required fields and formats for camera create/update.
+func validateCamera(cam *model.Camera) error {
+	if cam.Name == "" {
+		return apperror.ErrInvalidInput.WithMessage("name is required")
+	}
+	if cam.IP == "" {
+		return apperror.ErrInvalidInput.WithMessage("ip is required")
+	}
+	if net.ParseIP(cam.IP) == nil {
+		return apperror.ErrInvalidInput.WithMessage("invalid ip format: " + cam.IP)
+	}
+	if cam.Port < 1 || cam.Port > 65535 {
+		return apperror.ErrInvalidInput.WithMessage("port must be 1-65535")
+	}
+	if cam.Protocol != "RTSP" && cam.Protocol != "ONVIF" {
+		return apperror.ErrInvalidInput.WithMessage("protocol must be RTSP or ONVIF")
+	}
+	if cam.StreamURL == "" {
+		return apperror.ErrInvalidInput.WithMessage("stream_url is required")
+	}
+	if _, err := url.Parse(cam.StreamURL); err != nil {
+		return apperror.ErrInvalidInput.WithMessage("invalid stream_url format")
+	}
+	return nil
 }
