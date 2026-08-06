@@ -1,0 +1,6 @@
+{"level":"info","ts":"2026-08-05T00:40:57.719Z","caller":"recording/retention.go:71","msg":"retention: deleted 2 recordings older than 2026-07-29"}
+{"level":"error","ts":"2026-08-05T00:40:57.730Z","caller":"recording/retention.go:105","msg":"retention: disk usage: The system cannot find the path specified."}
+{"level":"info","ts":"2026-08-05T00:48:05.875Z","caller":"recording/retention.go:71","msg":"retention: deleted 2 recordings older than 2026-07-29"}
+{"level":"error","ts":"2026-08-05T00:48:05.877Z","caller":"recording/retention.go:105","msg":"retention: disk usage: The system cannot find the path specified."}
+{"level":"info","ts":"2026-08-05T00:54:59.244Z","caller":"recording/retention.go:71","msg":"retention: deleted 2 recordings older than 2026-07-29"}
+{"level":"error","ts":"2026-08-05T00:54:59.246Z","caller":"recording/retention.go:105","msg":"retention: disk usage: The system cannot find the path specified."}

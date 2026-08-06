@@ -1,0 +1,1017 @@
+basePath: /
+definitions:
+  aiovms_internal_model.Camera:
+    properties:
+      codec:
+        description: H.264 / H.265
+        type: string
+      created_at:
+        type: string
+      deleted_at:
+        type: string
+      fps:
+        type: integer
+      id:
+        type: string
+      ip:
+        type: string
+      latitude:
+        type: number
+      license_id:
+        type: integer
+      longitude:
+        type: number
+      manufacturer:
+        type: string
+      media_mtx_path:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      port:
+        type: integer
+      protocol:
+        description: RTSP / ONVIF
+        type: string
+      resolution:
+        type: string
+      site_id:
+        type: string
+      status:
+        description: online / offline / connecting / disconnected / error
+        type: string
+      stream_url:
+        type: string
+      sub_stream_url:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
+  aiovms_internal_model.RecordSchedule:
+    properties:
+      camera_id:
+        type: string
+      created_at:
+        type: string
+      enabled:
+        type: boolean
+      end_time:
+        description: '"20:00"'
+        type: string
+      id:
+        type: string
+      last_action:
+        description: start / stop / idle
+        type: string
+      last_triggered_at:
+        type: string
+      license_id:
+        type: integer
+      name:
+        type: string
+      start_time:
+        description: '"08:00"'
+        type: string
+      stream_type:
+        description: main / sub
+        type: string
+      updated_at:
+        type: string
+      weekdays:
+        description: '"1,2,3,4,5" (Sun=0)'
+        type: string
+    type: object
+  aiovms_internal_model.Recording:
+    properties:
+      camera_id:
+        type: string
+      codec:
+        type: string
+      created_at:
+        type: string
+      duration:
+        type: integer
+      end_time:
+        type: string
+      file_path:
+        type: string
+      file_size:
+        type: integer
+      filename:
+        type: string
+      id:
+        type: string
+      license_id:
+        type: integer
+      record_type:
+        description: manual / scheduled / motion
+        type: string
+      resolution:
+        type: string
+      start_time:
+        type: string
+      status:
+        description: recording / complete / truncated
+        type: string
+      updated_at:
+        type: string
+    type: object
+  aiovms_internal_onvif.DiscoveredDevice:
+    properties:
+      firmware:
+        type: string
+      ip:
+        type: string
+      manufacturer:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      port:
+        type: integer
+      serial_number:
+        type: string
+      stream_urls:
+        items:
+          type: string
+        type: array
+    type: object
+  aiovms_pkg_utils.PaginatedResponse:
+    properties:
+      code:
+        type: integer
+      data:
+        $ref: '#/definitions/aiovms_pkg_utils.pageData'
+      message:
+        type: string
+    type: object
+  aiovms_pkg_utils.Response:
+    properties:
+      code:
+        type: integer
+      data: {}
+      message:
+        type: string
+    type: object
+  aiovms_pkg_utils.pageData:
+    properties:
+      list: {}
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  internal_camera.CreateCameraRequest:
+    properties:
+      ip:
+        type: string
+      latitude:
+        type: number
+      longitude:
+        type: number
+      manufacturer:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      password:
+        type: string
+      port:
+        type: integer
+      protocol:
+        description: RTSP / ONVIF
+        type: string
+      site_id:
+        type: string
+      stream_url:
+        type: string
+      sub_stream_url:
+        type: string
+      username:
+        type: string
+    type: object
+  internal_camera.StreamURLs:
+    properties:
+      flv:
+        type: string
+      hls:
+        type: string
+      webrtc:
+        type: string
+    type: object
+  internal_camera.UpdateCameraRequest:
+    properties:
+      ip:
+        type: string
+      latitude:
+        type: number
+      longitude:
+        type: number
+      manufacturer:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      password:
+        type: string
+      port:
+        type: integer
+      protocol:
+        type: string
+      site_id:
+        type: string
+      stream_url:
+        type: string
+      sub_stream_url:
+        type: string
+      username:
+        type: string
+    type: object
+host: localhost:8081
+info:
+  contact:
+    name: API Support
+    url: https://github.com/qoderwork/aiovms
+  description: |-
+    Video Management Service for AIO NMS.
+    Provides camera management, recording, and scheduling APIs. Internal service invoked by NMS proxy.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  title: AIO VMS API
+  version: "1.0"
+paths:
+  /cameras:
+    get:
+      consumes:
+      - application/json
+      description: 按租户分页查询摄像头，支持名称/IP模糊搜索
+      parameters:
+      - description: 名称或 IP 关键字
+        in: query
+        name: q
+        type: string
+      - default: 1
+        description: 页码（从 1 开始）
+        in: query
+        name: page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.PaginatedResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/aiovms_internal_model.Camera'
+                  type: array
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 摄像头列表（分页）
+      tags:
+      - 摄像头管理
+    post:
+      consumes:
+      - application/json
+      description: 创建摄像头并注册到 MediaMTX，status 初始为 connecting
+      parameters:
+      - description: 摄像头参数（含 password 明文）
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_camera.CreateCameraRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/aiovms_internal_model.Camera'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 创建摄像头
+      tags:
+      - 摄像头管理
+  /cameras/{id}:
+    delete:
+      description: 软删除摄像头并从 MediaMTX 注销
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 删除摄像头
+      tags:
+      - 摄像头管理
+    get:
+      description: 按 ID 查询单个摄像头
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/aiovms_internal_model.Camera'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 摄像头详情
+      tags:
+      - 摄像头管理
+    put:
+      consumes:
+      - application/json
+      description: 更新摄像头参数，可选重置 password
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 摄像头参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_camera.UpdateCameraRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 更新摄像头
+      tags:
+      - 摄像头管理
+  /cameras/{id}/connect:
+    post:
+      description: 触发与 ONVIF/RTSP 设备的连接
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 连接摄像头
+      tags:
+      - 摄像头管理
+  /cameras/{id}/disconnect:
+    post:
+      description: 断开与设备的连接
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 断开摄像头
+      tags:
+      - 摄像头管理
+  /cameras/{id}/snapshot:
+    get:
+      description: 触发设备抓拍并返回快照信息
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 抓拍快照
+      tags:
+      - 摄像头管理
+  /cameras/{id}/stream:
+    get:
+      description: 返回 MediaMTX 的 HTTP-FLV 地址（一期默认启用）
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              url:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 获取 HTTP-FLV 播放地址
+      tags:
+      - 摄像头管理
+  /cameras/{id}/stream-urls:
+    get:
+      description: 返回 FLV/HLS/WebRTC 三种播放地址（一期前端默认使用 HTTP-FLV）
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_camera.StreamURLs'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 获取全部流地址
+      tags:
+      - 摄像头管理
+  /cameras/{id}/stream/hls:
+    get:
+      description: 返回 MediaMTX 的 HLS 地址，二期开放
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              url:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 获取 HLS 播放地址（二期）
+      tags:
+      - 摄像头管理
+  /cameras/{id}/stream/webrtc:
+    get:
+      description: 返回 MediaMTX 的 WebRTC 地址，二期开放
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              url:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 获取 WebRTC 播放地址（二期）
+      tags:
+      - 摄像头管理
+  /cameras/discover:
+    post:
+      consumes:
+      - application/json
+      description: 通过 WS-Discovery 在本网段探测 ONVIF 设备
+      parameters:
+      - description: 可选，timeout_sec 缺省 5 秒
+        in: body
+        name: request
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/aiovms_internal_onvif.DiscoveredDevice'
+                  type: array
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: ONVIF 设备发现
+      tags:
+      - 摄像头管理
+  /cameras/status:
+    get:
+      description: 返回所有摄像头的轻量级状态，供 NMS 订阅
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 摄像头状态列表
+      tags:
+      - 摄像头管理
+  /recordings:
+    get:
+      description: 按摄像头 + 时间范围分页查询录像
+      parameters:
+      - description: 摄像头 ID
+        in: query
+        name: camera_id
+        type: string
+      - description: 开始时间下限（RFC3339）
+        in: query
+        name: start_time
+        type: string
+      - description: 开始时间上限（RFC3339）
+        in: query
+        name: end_time
+        type: string
+      - default: 1
+        description: 页码（从 1 开始）
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.PaginatedResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/aiovms_internal_model.Recording'
+                  type: array
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 录像列表（分页）
+      tags:
+      - 录像管理
+  /recordings/{id}:
+    delete:
+      description: 删除录像文件和数据库记录
+      parameters:
+      - description: 录像 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 删除录像
+      tags:
+      - 录像管理
+    get:
+      description: 按 ID 查询录像，返回录像信息和回放 URL
+      parameters:
+      - description: 录像 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
+            - properties:
+                data:
+                  properties:
+                    play_url:
+                      type: string
+                    recording:
+                      $ref: '#/definitions/aiovms_internal_model.Recording'
+                  type: object
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 录像详情
+      tags:
+      - 录像管理
+  /recordings/cameras/{id}/start:
+    post:
+      description: 对指定摄像头立即开始手动录像
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 手动开始录像
+      tags:
+      - 录像管理
+  /recordings/cameras/{id}/stop:
+    post:
+      description: 对指定摄像头立即停止手动录像
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 手动停止录像
+      tags:
+      - 录像管理
+  /schedules:
+    get:
+      description: 按租户查询录像计划，可选按摄像头过滤
+      parameters:
+      - description: 摄像头 ID
+        in: query
+        name: camera_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/aiovms_internal_model.RecordSchedule'
+                  type: array
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 录像计划列表
+      tags:
+      - 录像计划
+    post:
+      consumes:
+      - application/json
+      description: 为摄像头创建周期性录像计划
+      parameters:
+      - description: 录像计划参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/aiovms_internal_model.RecordSchedule'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/aiovms_internal_model.RecordSchedule'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 创建录像计划
+      tags:
+      - 录像计划
+  /schedules/{id}:
+    delete:
+      description: 删除指定录像计划
+      parameters:
+      - description: 计划 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 删除录像计划
+      tags:
+      - 录像计划
+    put:
+      consumes:
+      - application/json
+      description: 更新指定录像计划的参数
+      parameters:
+      - description: 计划 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 录像计划参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/aiovms_internal_model.RecordSchedule'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 更新录像计划
+      tags:
+      - 录像计划
+  /schedules/{id}/toggle:
+    patch:
+      description: 翻转录像计划的 enabled 标志
+      parameters:
+      - description: 计划 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/aiovms_internal_model.RecordSchedule'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 启停录像计划
+      tags:
+      - 录像计划
+securityDefinitions:
+  TenantHeader:
+    description: Tenant (license) ID, forwarded by NMS. Use "default" for tenant 1.
+    in: header
+    name: X-License-Id
+    type: apiKey
+  UserHeader:
+    description: User ID, forwarded by NMS.
+    in: header
+    name: X-User-Id
+    type: apiKey
+swagger: "2.0"

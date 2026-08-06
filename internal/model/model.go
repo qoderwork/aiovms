@@ -1,0 +1,88 @@
+package model
+
+import "time"
+
+// Camera represents a camera registered in the VMS system.
+type Camera struct {
+	ID            string     `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	Name          string     `gorm:"column:name;type:varchar(128)" json:"name"`
+	IP            string     `gorm:"column:ip;type:varchar(64)" json:"ip"`
+	Port          int        `gorm:"column:port" json:"port"`
+	Protocol      string     `gorm:"column:protocol;type:varchar(32)" json:"protocol"` // RTSP / ONVIF
+	Username      string     `gorm:"column:username;type:varchar(64)" json:"username"`
+	PasswordEnc   string     `gorm:"column:password_enc;type:varchar(512)" json:"-"`
+	Password      string     `gorm:"-" json:"-"`  // plaintext received from request, never persisted nor returned
+	StreamURL     string     `gorm:"column:stream_url;type:varchar(512)" json:"stream_url"`
+	SubStreamURL  string     `gorm:"column:sub_stream_url;type:varchar(512)" json:"sub_stream_url"`
+	Status        string     `gorm:"column:status;type:varchar(32)" json:"status"` // online / offline / connecting / disconnected / error
+	Resolution    string     `gorm:"column:resolution;type:varchar(32)" json:"resolution"`
+	FPS           int        `gorm:"column:fps" json:"fps"`
+	Codec         string     `gorm:"column:codec;type:varchar(32)" json:"codec"` // H.264 / H.265
+	Manufacturer  string     `gorm:"column:manufacturer;type:varchar(64)" json:"manufacturer"`
+	Model         string     `gorm:"column:model;type:varchar(128)" json:"model"`
+	SiteID        *string    `gorm:"column:site_id;type:varchar(32)" json:"site_id"`
+	Latitude      *float64   `gorm:"column:latitude;type:decimal(10,6)" json:"latitude"`
+	Longitude     *float64   `gorm:"column:longitude;type:decimal(10,6)" json:"longitude"`
+	MediaMTXPath  string     `gorm:"column:media_mtx_path;type:varchar(128)" json:"media_mtx_path"`
+	LicenseID     int64      `gorm:"column:license_id" json:"license_id"`
+	CreatedAt     time.Time  `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at" json:"updated_at"`
+	DeletedAt     *time.Time `gorm:"column:deleted_at;index" json:"deleted_at,omitempty"`
+}
+
+func (Camera) TableName() string { return "cameras" }
+
+// Recording represents a recorded video file on disk.
+type Recording struct {
+	ID         string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	CameraID   string    `gorm:"column:camera_id;type:varchar(36);index" json:"camera_id"`
+	Filename   string    `gorm:"column:filename;type:varchar(256)" json:"filename"`
+	FilePath   string    `gorm:"column:file_path;type:varchar(512);uniqueIndex" json:"file_path"`
+	FileSize   int64     `gorm:"column:file_size" json:"file_size"`
+	StartTime  time.Time `gorm:"column:start_time" json:"start_time"`
+	EndTime    time.Time `gorm:"column:end_time" json:"end_time"`
+	Duration   int       `gorm:"column:duration" json:"duration"`
+	Codec      string    `gorm:"column:codec;type:varchar(32)" json:"codec"`
+	Resolution string    `gorm:"column:resolution;type:varchar(32)" json:"resolution"`
+	Status     string    `gorm:"column:status;type:varchar(32)" json:"status"` // recording / complete / truncated
+	RecordType string    `gorm:"column:record_type;type:varchar(32)" json:"record_type"` // reserved; currently all "scheduled"
+	LicenseID  int64     `gorm:"column:license_id" json:"license_id"`
+	CreatedAt  time.Time `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at" json:"updated_at"`
+}
+
+func (Recording) TableName() string { return "recordings" }
+
+// RecordSchedule defines a recurring recording plan for a camera.
+type RecordSchedule struct {
+	ID              string     `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	CameraID        string     `gorm:"column:camera_id;type:varchar(36);index" json:"camera_id"`
+	Name            string     `gorm:"column:name;type:varchar(128)" json:"name"`
+	Enabled         bool       `gorm:"column:enabled" json:"enabled"`
+	Weekdays        string     `gorm:"column:weekdays;type:varchar(32)" json:"weekdays"` // "1,2,3,4,5" (Sun=0)
+	StreamType      string     `gorm:"column:stream_type;type:varchar(32)" json:"stream_type"` // main / sub
+	StartTime       string     `gorm:"column:start_time;type:time" json:"start_time"`        // "08:00"
+	EndTime         string     `gorm:"column:end_time;type:time" json:"end_time"`            // "20:00"
+	LastTriggeredAt *time.Time `gorm:"column:last_triggered_at" json:"last_triggered_at"`
+	LastAction      string     `gorm:"column:last_action;type:varchar(16)" json:"last_action"` // start / stop / idle
+	LicenseID       int64      `gorm:"column:license_id" json:"license_id"`
+	CreatedAt       time.Time  `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at" json:"updated_at"`
+}
+
+func (RecordSchedule) TableName() string { return "record_schedules" }
+
+// VMSAuditLog records operations on cameras and recordings for audit.
+type VMSAuditLog struct {
+	ID        string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	UserID    int       `gorm:"column:user_id" json:"user_id"`
+	Username  string    `gorm:"column:username;type:varchar(128)" json:"username"`
+	Action    string    `gorm:"column:action;type:varchar(64)" json:"action"`
+	Target    string    `gorm:"column:target;type:varchar(64)" json:"target"` // camera / recording / schedule
+	TargetID  string    `gorm:"column:target_id;type:varchar(36)" json:"target_id"`
+	Detail    string    `gorm:"column:detail;type:text" json:"detail"`
+	LicenseID int64     `gorm:"column:license_id" json:"license_id"`
+	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
+}
+
+func (VMSAuditLog) TableName() string { return "vms_audit_log" }

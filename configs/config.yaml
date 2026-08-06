@@ -1,0 +1,36 @@
+server:
+  port: 8081
+
+database:
+  host: mysql
+  port: 3306
+  user: root
+  password: root123
+  dbname: swnms
+  charset: utf8mb4
+  max_idle_conns: 10
+  max_open_conns: 50
+  log_level: info
+
+redis:
+  host: redis
+  port: 6379
+  password: ""
+  db: 0
+
+mediamtx:
+  url: "http://mediamtx:8888"
+
+recording:
+  path: "/recordings"
+  retention_days: 7
+  disk_watermark: 90
+
+logger:
+  filename: "logs/aiovms.log"
+  level: "info"
+  max_size_mb: 50
+  max_backups: 3
+  retention_days: 7
+  compress: true
+  stdout: true

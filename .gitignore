@@ -1,0 +1,5 @@
+/logs/
+/vms
+*.exe
+*.test
+*.out
