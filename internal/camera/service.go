@@ -42,14 +42,22 @@ type SnapshotResult struct {
 	ImageURL string `json:"image_url"`
 }
 
+// mediaMTXClient abstracts MediaMTX HTTP API for testability.
+type mediaMTXClient interface {
+	AddPath(name string, cfg mediamtx.PathConfig) error
+	DeletePath(name string) error
+	SnapshotPath(name string) string
+}
+
 type service struct {
 	repo Repository
-	mtx  *mediamtx.Client
+	mtx  mediaMTXClient
 }
 
 func NewService(repo Repository, mtx *mediamtx.Client) Service {
 	return &service{repo: repo, mtx: mtx}
 }
+
 
 type StreamURLs struct {
 	FLV    string `json:"flv"`

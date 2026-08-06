@@ -27,10 +27,16 @@ type Service interface {
 	TriggerActive(ctx context.Context) error
 }
 
+// mediaMTXClient abstracts MediaMTX API for testability.
+type mediaMTXClient interface {
+	PatchPath(name string, patch map[string]any) error
+	ListPaths() ([]mediamtx.PathInfo, error)
+}
+
 type service struct {
 	repo     Repository
 	camRepo  CameraRepository
-	mtx      *mediamtx.Client
+	mtx      mediaMTXClient
 	cronSched *cron.Cron
 }
 

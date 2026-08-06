@@ -23,10 +23,15 @@ type Service interface {
 	Upsert(ctx context.Context, rec *model.Recording) error
 }
 
+// mediaMTXClient abstracts MediaMTX API for testability.
+type mediaMTXClient interface {
+	PatchPath(name string, patch map[string]any) error
+}
+
 type service struct {
 	repo   Repository
 	camSvc CameraService
-	mtx    *mediamtx.Client
+	mtx    mediaMTXClient
 }
 
 type CameraService interface {
