@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"time"
 
 	onvif2 "github.com/IOTechSystems/onvif"
 	"github.com/IOTechSystems/onvif/media"
@@ -52,11 +53,37 @@ func NewDiscoveryService() DiscoveryService {
 }
 
 // Discover performs WS-Discovery multicast Probe to find ONVIF devices.
+// timeoutSec controls the maximum wait time for device responses.
+// Note: the underlying ws-discovery library has a 1-second per-packet read
+// deadline; this timeout provides an upper bound for the entire discovery.
 func (s *discoveryService) Discover(ctx context.Context, timeoutSec int) ([]DiscoveredDevice, error) {
-	onvifDevices, err := wsdiscovery.GetAvailableDevicesAtSpecificEthernetInterface("")
-	if err != nil {
-		return nil, fmt.Errorf("discovery probe: %w", err)
+	if timeoutSec <= 0 {
+		timeoutSec = 5
 	}
+
+	type result struct {
+		devices []onvif2.Device
+		err     error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		devices, err := wsdiscovery.GetAvailableDevicesAtSpecificEthernetInterface("")
+		ch <- result{devices, err}
+	}()
+
+	var r result
+	select {
+	case r = <-ch:
+	case <-time.After(time.Duration(timeoutSec) * time.Second):
+		return nil, fmt.Errorf("discovery timed out after %ds", timeoutSec)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	if r.err != nil {
+		return nil, fmt.Errorf("discovery probe: %w", r.err)
+	}
+	onvifDevices := r.devices
 	if len(onvifDevices) == 0 {
 		return nil, nil
 	}

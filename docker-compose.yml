@@ -1,0 +1,94 @@
+# AIO VMS 本地开发环境
+# 启动: docker compose up -d
+# 停止: docker compose down
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: aiovms-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: swnms
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: aiovms-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # MediaMTX 流媒体服务器
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: aiovms-mediamtx
+    restart: unless-stopped
+    ports:
+      - "8554:8554"   # RTSP
+      - "8888:8888"   # HTTP API
+      - "1935:1935"   # RTMP
+    volumes:
+      - mediamtx-recordings:/recordings
+    environment:
+      MTX_PATHS_ALL_RECORDPATH: /recordings/%path/%Y-%m-%d_%H-%M-%S
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8888/v3/paths/list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # VMS 后端服务
+  aiovms:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aiovms-server
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      VMS_ENCRYPTION_KEY: "change-me-to-a-32-byte-secret!!"  # 生产环境需替换为强密钥
+    volumes:
+      - aiovms-logs:/logs
+      - mediamtx-recordings:/recordings
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mediamtx:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  mysql-data:
+  redis-data:
+  mediamtx-recordings:
+  aiovms-logs:

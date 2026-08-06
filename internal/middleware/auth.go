@@ -102,9 +102,3 @@ func CORSMiddleware(allowedOrigins []string) gin.HandlerFunc {
 		c.Next()
 	}
 }
-
-// IntPtr helper for request binding.
-func IntPtr(s string) int {
-	v, _ := strconv.Atoi(s)
-	return v
-}
