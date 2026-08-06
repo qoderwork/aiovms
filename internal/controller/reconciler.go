@@ -1,0 +1,427 @@
+package controller
+
+import (
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+
+	"aiovms/internal/mediamtx"
+	"aiovms/internal/model"
+	"aiovms/pkg/logger"
+)
+
+// ---------------------------------------------------------------------------
+// Local interfaces (ISP: only the methods the reconciler needs)
+// ---------------------------------------------------------------------------
+
+type CameraRepo interface {
+	FindAll() ([]model.Camera, error)
+	FindByID(id string) (*model.Camera, error)
+	UpdateStatus(id string, status string) error
+}
+
+type ScheduleRepo interface {
+	FindAllEnabled() ([]model.RecordSchedule, error)
+	Update(sch *model.RecordSchedule) error
+}
+
+type RecordingRepo interface {
+	FindActiveSessions() ([]model.RecordingSession, error)
+	FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error)
+	FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error)
+	CreateSession(sess *model.RecordingSession) error
+	CloseSession(id string, endTime time.Time) error
+}
+
+type MediaMTXClient interface {
+	AddPath(name string, cfg mediamtx.PathConfig) error
+	DeletePath(name string) error
+	PatchPath(name string, patch map[string]any) error
+	ListPathConfigs() (map[string]mediamtx.PathConfigItem, error)
+	HealthCheck() error
+}
+
+// ---------------------------------------------------------------------------
+// Reconciler
+// ---------------------------------------------------------------------------
+
+const (
+	reconcileInterval = 10 * time.Second
+	statusProbeEvery  = 3 // probe camera status every 3 ticks (30s)
+	probeTimeout      = 3 * time.Second
+)
+
+// Reconciler is the unified control loop that replaces the former 3 separate
+// sync mechanisms (startup sync, event-driven MTX recovery, 60s cron triggerJob).
+//
+// It runs every 10 seconds and performs three idempotent sub-reconciliations:
+//  1. reconcileStreams  — ensure MediaMTX paths match DB (create missing, fix drift, remove orphans)
+//  2. reconcileRecording — ensure recording state matches schedules + active sessions
+//  3. reconcileCameraStatus — TCP-probe cameras for online/offline (every 30s)
+//
+// Design principle: Desired State (DB) → Read Actual State (MediaMTX) → Diff → Apply.
+// No event dependency; self-healing after any outage.
+type Reconciler struct {
+	camRepo CameraRepo
+	schRepo ScheduleRepo
+	recRepo RecordingRepo
+	mtx     MediaMTXClient
+
+	mtxDown      bool
+	probeCounter int
+	stopCh       chan struct{}
+	stopOnce     sync.Once
+}
+
+func NewReconciler(
+	camRepo CameraRepo,
+	schRepo ScheduleRepo,
+	recRepo RecordingRepo,
+	mtx MediaMTXClient,
+) *Reconciler {
+	return &Reconciler{
+		camRepo: camRepo,
+		schRepo: schRepo,
+		recRepo: recRepo,
+		mtx:     mtx,
+		stopCh:  make(chan struct{}),
+	}
+}
+
+func (r *Reconciler) Run() {
+	logger.Infof("reconciler started (interval=%s)", reconcileInterval)
+	ticker := time.NewTicker(reconcileInterval)
+	defer ticker.Stop()
+
+	r.reconcile() // initial full reconcile on startup
+	for {
+		select {
+		case <-ticker.C:
+			r.reconcile()
+		case <-r.stopCh:
+			logger.Info("reconciler stopped")
+			return
+		}
+	}
+}
+
+func (r *Reconciler) Stop() {
+	r.stopOnce.Do(func() { close(r.stopCh) })
+}
+
+// reconcile runs all sub-reconcilers. Each is independent and idempotent.
+func (r *Reconciler) reconcile() {
+	// 1. Check MediaMTX health
+	if err := r.mtx.HealthCheck(); err != nil {
+		if !r.mtxDown {
+			logger.Warnf("reconciler: mediamtx is down: %v", err)
+			r.mtxDown = true
+		}
+		return
+	}
+	if r.mtxDown {
+		logger.Info("reconciler: mediamtx recovered, running full reconcile")
+		r.mtxDown = false
+	}
+
+	// 2. Fetch MediaMTX path configs once (shared by sub-reconcilers)
+	mtxConfigs, err := r.mtx.ListPathConfigs()
+	if err != nil {
+		logger.Errorf("reconciler: list mediamtx configs: %v", err)
+		return
+	}
+
+	// 3. Ensure streams exist (idempotent)
+	r.reconcileStreams(mtxConfigs)
+
+	// 4. Ensure recording state matches desired state
+	r.reconcileRecording(mtxConfigs)
+
+	// 5. Probe camera status every 3rd tick (30s)
+	r.probeCounter++
+	if r.probeCounter >= statusProbeEvery {
+		r.reconcileCameraStatus()
+		r.probeCounter = 0
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Sub-reconciler: Streams
+// ---------------------------------------------------------------------------
+
+// reconcileStreams ensures every DB camera has a corresponding path in MediaMTX
+// with the correct source configuration, and removes orphaned cam-* paths.
+//
+// Idempotent: skips paths that already exist with matching config.
+// Respects subjective states: disconnected cameras are not re-created;
+// their stale paths (if any) are treated as orphans and removed.
+func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigItem) {
+	cams, err := r.camRepo.FindAll()
+	if err != nil {
+		logger.Errorf("reconcile streams: fetch cameras: %v", err)
+		return
+	}
+
+	// Ensure all DB cameras have paths with correct config
+	dbPaths := make(map[string]bool, len(cams))
+	for _, cam := range cams {
+		// Skip disconnected cameras — user explicitly detached, don't rebuild path.
+		// Their path (if any) will be treated as orphan and cleaned up below.
+		if cam.Status == "disconnected" {
+			continue
+		}
+		dbPaths[cam.MediaMTXPath] = true
+
+		existing, exists := mtxConfigs[cam.MediaMTXPath]
+		if exists {
+			// Check for source drift
+			if existing.Source == cam.StreamURL && existing.SourceOnDemand {
+				continue // config matches, nothing to do
+			}
+			// Source changed — delete and re-add
+			logger.Warnf("reconcile streams: drift detected for %s (source %q -> %q)",
+				cam.MediaMTXPath, existing.Source, cam.StreamURL)
+			if err := r.mtx.DeletePath(cam.MediaMTXPath); err != nil {
+				logger.Warnf("reconcile streams: delete stale path %s: %v", cam.MediaMTXPath, err)
+				continue
+			}
+		}
+
+		if err := r.mtx.AddPath(cam.MediaMTXPath, mediamtx.PathConfig{
+			Source:         cam.StreamURL,
+			SourceOnDemand: true,
+		}); err != nil {
+			logger.Warnf("reconcile streams: add path %s for camera %s: %v", cam.MediaMTXPath, cam.ID, err)
+		} else {
+			logger.Infof("reconcile streams: created path %s for camera %s", cam.MediaMTXPath, cam.ID)
+		}
+		_ = r.camRepo.UpdateStatus(cam.ID, "connecting")
+	}
+
+	// Remove orphaned cam-* paths (not in DB, or disconnected cameras' stale paths)
+	for name := range mtxConfigs {
+		if !strings.HasPrefix(name, "cam-") {
+			continue
+		}
+		if !dbPaths[name] {
+			if err := r.mtx.DeletePath(name); err != nil {
+				logger.Warnf("reconcile streams: remove orphan path %s: %v", name, err)
+			} else {
+				logger.Infof("reconcile streams: removed orphan path %s", name)
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Sub-reconciler: Recording
+// ---------------------------------------------------------------------------
+
+// reconcileRecording ensures MediaMTX recording state matches the desired state
+// derived from schedules and active recording sessions.
+//
+// Logic:
+//  1. Process schedule transitions (start/stop) and manage RecordingSessions
+//  2. Compute desired recording state per camera (schedule OR manual session)
+//  3. Compare with actual MediaMTX record config and apply diff
+func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfigItem) {
+	now := time.Now()
+	weekday := int(now.Weekday())
+	timeStr := now.Format("15:04")
+
+	// --- 1. Process schedule transitions ---
+
+	schedules, err := r.schRepo.FindAllEnabled()
+	if err != nil {
+		logger.Errorf("reconcile recording: fetch schedules: %v", err)
+		return
+	}
+
+	// Track cameras that should be recording due to schedule
+	scheduleRecording := make(map[string]bool) // cameraID → true
+
+	for i := range schedules {
+		sch := &schedules[i]
+		if !containsWeekday(sch.Weekdays, weekday) {
+			continue
+		}
+
+		cam, err := r.camRepo.FindByID(sch.CameraID)
+		if err != nil || cam == nil {
+			logger.Errorf("reconcile recording: camera %s not found for schedule %s", sch.CameraID, sch.ID)
+			continue
+		}
+
+		inWindow := true
+		if sch.StartTime != "" && timeStr < sch.StartTime {
+			inWindow = false
+		}
+		if sch.EndTime != "" && timeStr > sch.EndTime {
+			inWindow = false
+		}
+
+		switch {
+		case inWindow && sch.LastAction != "start":
+			// Start recording
+			if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true}); err != nil {
+				logger.Errorf("reconcile recording: start schedule %s: %v", sch.ID, err)
+				continue
+			}
+			sess := &model.RecordingSession{
+				ID:          uuid.NewString(),
+				CameraID:    cam.ID,
+				TriggerType: "schedule",
+				ScheduleID:  &sch.ID,
+				StartTime:   now,
+				LicenseID:   cam.LicenseID,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+			if err := r.recRepo.CreateSession(sess); err != nil {
+				logger.Errorf("reconcile recording: create session for schedule %s: %v", sch.ID, err)
+			}
+			sch.LastAction = "start"
+			nowCopy := now
+			sch.LastTriggeredAt = &nowCopy
+			_ = r.schRepo.Update(sch)
+			scheduleRecording[cam.ID] = true
+			logger.Infof("reconcile recording: started schedule %s camera %s", sch.ID, sch.CameraID)
+
+		case !inWindow && sch.LastAction == "start":
+			// Stop recording (unless manual session is active)
+			manualActive := false
+			if sess, err := r.recRepo.FindActiveSessionByCamera(sch.CameraID); err == nil && sess != nil {
+				if sess.TriggerType == "manual" {
+					manualActive = true
+				}
+			}
+			if !manualActive {
+				_ = r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": false})
+			}
+			if sess, err := r.recRepo.FindActiveSessionBySchedule(sch.ID); err == nil && sess != nil {
+				_ = r.recRepo.CloseSession(sess.ID, now)
+			}
+			sch.LastAction = "stop"
+			_ = r.schRepo.Update(sch)
+			logger.Infof("reconcile recording: stopped schedule %s camera %s (manual_active=%v)", sch.ID, sch.CameraID, manualActive)
+
+		case inWindow && sch.LastAction == "start":
+			scheduleRecording[cam.ID] = true
+		}
+	}
+
+	// --- 2. Recover active sessions (manual + schedule drift) ---
+
+	sessions, err := r.recRepo.FindActiveSessions()
+	if err != nil {
+		logger.Errorf("reconcile recording: fetch active sessions: %v", err)
+		return
+	}
+
+	restored := 0
+	for _, sess := range sessions {
+		cam, err := r.camRepo.FindByID(sess.CameraID)
+		if err != nil || cam == nil {
+			continue
+		}
+
+		actualRecording := false
+		if cfg, exists := mtxConfigs[cam.MediaMTXPath]; exists {
+			actualRecording = cfg.Record
+		}
+
+		if !actualRecording {
+			// Active session exists but MediaMTX not recording — re-apply
+			if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true}); err != nil {
+				logger.Errorf("reconcile recording: recover session %s camera %s: %v", sess.ID, sess.CameraID, err)
+				continue
+			}
+			restored++
+			logger.Warnf("reconcile recording: recovered session %s camera %s (drift)", sess.ID, sess.CameraID)
+		}
+	}
+	if restored > 0 {
+		logger.Infof("reconcile recording: recovered %d sessions from drift", restored)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Sub-reconciler: Camera Status
+// ---------------------------------------------------------------------------
+
+// reconcileCameraStatus TCP-probes each camera and updates online/offline status.
+//
+// Status protection rules:
+//   - disconnected: skip (user explicitly detached; probe must not override)
+//   - error:        skip (system error state; probe must not auto-clear)
+//   - connecting:   probe, but only transition to online (grace period —
+//                   don't write offline on first probe to avoid UI flicker)
+//   - online/offline: probe normally
+func (r *Reconciler) reconcileCameraStatus() {
+	cams, err := r.camRepo.FindAll()
+	if err != nil {
+		logger.Errorf("reconcile status: fetch cameras: %v", err)
+		return
+	}
+
+	for _, cam := range cams {
+		// Skip subjective/system states that must not be overwritten by probe
+		if cam.Status == "disconnected" || cam.Status == "error" {
+			continue
+		}
+
+		oldStatus := cam.Status
+		newStatus := probeCamera(cam.IP, cam.Port)
+
+		// For connecting cameras, only transition to online (grace period)
+		if oldStatus == "connecting" && newStatus == "offline" {
+			continue
+		}
+
+		if oldStatus != newStatus {
+			logger.Infof("reconcile status: camera %s %s -> %s", cam.ID, oldStatus, newStatus)
+			_ = r.camRepo.UpdateStatus(cam.ID, newStatus)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func probeCamera(ip string, port int) string {
+	if port <= 0 {
+		port = 554
+	}
+	addr := net.JoinHostPort(ip, strconv.Itoa(port))
+	conn, err := net.DialTimeout("tcp", addr, probeTimeout)
+	if err != nil {
+		return "offline"
+	}
+	conn.Close()
+	return "online"
+}
+
+func containsWeekday(weekdays string, day int) bool {
+	if weekdays == "" {
+		return false
+	}
+	for _, s := range strings.Split(weekdays, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		d, err := strconv.Atoi(s)
+		if err != nil {
+			continue
+		}
+		if d == day {
+			return true
+		}
+	}
+	return false
+}

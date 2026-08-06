@@ -7,7 +7,6 @@ require (
 	github.com/abema/go-mp4 v1.7.1
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
-	github.com/robfig/cron/v3 v3.0.1
 	github.com/shirou/gopsutil/v4 v4.26.6
 	github.com/spf13/viper v1.18.2
 	github.com/swaggo/files v1.0.1

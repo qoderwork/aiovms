@@ -24,6 +24,7 @@ type Repository interface {
 	CreateSession(sess *model.RecordingSession) error
 	FindActiveSessions() ([]model.RecordingSession, error)
 	FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error)
+	FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error)
 	CloseSession(id string, endTime time.Time) error
 	// FindSessionByCameraAndTime returns the session whose [start_time, end_time]
 	// interval covers the given time t. Used by scanner to link an mp4 file to its
@@ -120,6 +121,18 @@ func (r *repository) FindActiveSessions() ([]model.RecordingSession, error) {
 func (r *repository) FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error) {
 	var sess model.RecordingSession
 	err := r.db.Where("camera_id = ? AND end_time IS NULL", cameraID).
+		Order("start_time DESC").First(&sess).Error
+	if err != nil {
+		return nil, err
+	}
+	return &sess, nil
+}
+
+// FindActiveSessionBySchedule returns the active session for a schedule, if any.
+// Used by the reconciler to close sessions when a schedule time window ends.
+func (r *repository) FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error) {
+	var sess model.RecordingSession
+	err := r.db.Where("schedule_id = ? AND end_time IS NULL", scheduleID).
 		Order("start_time DESC").First(&sess).Error
 	if err != nil {
 		return nil, err

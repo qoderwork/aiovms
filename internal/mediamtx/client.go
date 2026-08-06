@@ -29,9 +29,15 @@ func NewClient(baseURL string) *Client {
 
 // AddPath registers a new RTSP source path in MediaMTX.
 func (c *Client) AddPath(name string, cfg PathConfig) error {
-	body, _ := json.Marshal(cfg)
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal path config: %w", err)
+	}
 	url := fmt.Sprintf("%s/v3/config/paths/add/%s", c.baseURL, name)
-	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	return c.do(req)
 }
@@ -45,9 +51,15 @@ func (c *Client) DeletePath(name string) error {
 
 // PatchPath partially updates a path config (e.g. enable/disable recording).
 func (c *Client) PatchPath(name string, patch map[string]any) error {
-	body, _ := json.Marshal(patch)
+	body, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("marshal patch: %w", err)
+	}
 	url := fmt.Sprintf("%s/v3/config/paths/patch/%s", c.baseURL, name)
-	req, _ := http.NewRequest("PATCH", url, bytes.NewReader(body))
+	req, err := http.NewRequest("PATCH", url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	return c.do(req)
 }
@@ -61,6 +73,11 @@ func (c *Client) ListPaths() ([]PathInfo, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list paths: status %d: %s", resp.StatusCode, string(body))
+	}
+
 	var result struct {
 		Items []PathInfo `json:"items"`
 	}
@@ -72,6 +89,20 @@ func (c *Client) ListPaths() ([]PathInfo, error) {
 
 // ListConfigPaths returns all configured path names from MediaMTX.
 func (c *Client) ListConfigPaths() ([]string, error) {
+	configs, err := c.ListPathConfigs()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(configs))
+	for name := range configs {
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// ListPathConfigs returns all configured paths with their full config (including record state).
+// Returns a map keyed by path name for O(1) lookup during reconciliation.
+func (c *Client) ListPathConfigs() (map[string]PathConfigItem, error) {
 	url := fmt.Sprintf("%s/v3/config/paths/list", c.baseURL)
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
@@ -79,19 +110,23 @@ func (c *Client) ListConfigPaths() ([]string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list config paths: status %d: %s", resp.StatusCode, string(body))
+	}
+
 	var result struct {
-		Items []struct {
-			Name string `json:"name"`
-		} `json:"items"`
+		Items []PathConfigItem `json:"items"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode config paths: %w", err)
 	}
-	names := make([]string, 0, len(result.Items))
+
+	configs := make(map[string]PathConfigItem, len(result.Items))
 	for _, item := range result.Items {
-		names = append(names, item.Name)
+		configs[item.Name] = item
 	}
-	return names, nil
+	return configs, nil
 }
 
 // SnapshotPath returns the URL for fetching a JPEG snapshot from a path.
@@ -136,10 +171,19 @@ type PathConfig struct {
 	Record         bool   `json:"record,omitempty"`
 }
 
-// PathInfo is returned by ListPaths.
+// PathConfigItem is returned by ListPathConfigs. It includes the record
+// configuration which is absent from the runtime PathInfo.
+type PathConfigItem struct {
+	Name           string `json:"name"`
+	Source         string `json:"source"`
+	SourceOnDemand bool   `json:"sourceOnDemand"`
+	Record         bool   `json:"record"`
+}
+
+// PathInfo is returned by ListPaths (runtime state).
 type PathInfo struct {
-	Name    string `json:"name"`
-	Source  string `json:"source"`
-	Ready   bool   `json:"ready"`
-	Tracks  []any  `json:"tracks"`
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Ready  bool   `json:"ready"`
+	Tracks []any  `json:"tracks"`
 }

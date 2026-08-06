@@ -21,11 +21,6 @@ type Service interface {
 	StartManual(ctx context.Context, cameraID string) error
 	StopManual(ctx context.Context, cameraID string) error
 	Upsert(ctx context.Context, rec *model.Recording) error
-
-	// RecoverRecording re-applies record:true to MediaMTX paths for all sessions
-	// currently active (end_time IS NULL). Called after MediaMTX restart or VMS startup.
-	// Uses the camera cache (camSvc) to resolve MediaMTXPath per camera_id.
-	RecoverRecording(ctx context.Context) (restored int, failed int)
 }
 
 // mediaMTXClient abstracts MediaMTX API for testability.
@@ -145,38 +140,6 @@ func (s *service) StopManual(ctx context.Context, cameraID string) error {
 		return apperror.Wrap(err, 50000, 500, "failed to close recording session")
 	}
 	return nil
-}
-
-// RecoverRecording re-applies record:true for all sessions with end_time IS NULL.
-// Called after MediaMTX becomes reachable again (startup or runtime down→up).
-// Returns (restored, failed) counts for logging.
-func (s *service) RecoverRecording(ctx context.Context) (restored int, failed int) {
-	sessions, err := s.repo.FindActiveSessions()
-	if err != nil {
-		logger.Errorf("recover recording: list active sessions: %v", err)
-		return 0, 0
-	}
-	if len(sessions) == 0 {
-		logger.Info("recover recording: no active sessions to restore")
-		return 0, 0
-	}
-
-	for _, sess := range sessions {
-		cam, err := s.camSvc.Get(ctx, sess.CameraID)
-		if err != nil {
-			logger.Warnf("recover recording: camera %s not found for session %s: %v", sess.CameraID, sess.ID, err)
-			failed++
-			continue
-		}
-		if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true}); err != nil {
-			logger.Errorf("recover recording: patch %s for camera %s: %v", cam.MediaMTXPath, sess.CameraID, err)
-			failed++
-			continue
-		}
-		restored++
-	}
-	logger.Infof("recover recording: restored %d, failed %d (total active sessions: %d)", restored, failed, len(sessions))
-	return restored, failed
 }
 
 // Upsert creates or updates a recording record (called by file scanner).

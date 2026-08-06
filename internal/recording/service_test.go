@@ -96,6 +96,14 @@ func (m *mockRepo) FindActiveSessionByCamera(cameraID string) (*model.RecordingS
 	}
 	return nil, errors.New("not found")
 }
+func (m *mockRepo) FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error) {
+	for i := range m.activeSessions {
+		if m.activeSessions[i].ScheduleID != nil && *m.activeSessions[i].ScheduleID == scheduleID {
+			return &m.activeSessions[i], nil
+		}
+	}
+	return nil, errors.New("not found")
+}
 func (m *mockRepo) CloseSession(id string, endTime time.Time) error {
 	m.lastClosedSessionID = id
 	m.lastClosedAt = endTime
@@ -280,37 +288,6 @@ func TestRecordingStopManual(t *testing.T) {
 	}
 	if repo.lastClosedSessionID != "ses-1" {
 		t.Errorf("expected session ses-1 closed, got %q", repo.lastClosedSessionID)
-	}
-}
-
-// TestRecordingRecover verifies that RecoverRecording re-applies record:true
-// for all active sessions (end_time IS NULL) — the core of MTX restart recovery.
-func TestRecordingRecover(t *testing.T) {
-	repo := newMockRepo()
-	repo.activeSessions = []model.RecordingSession{
-		{ID: "ses-1", CameraID: "cam-a"},
-		{ID: "ses-2", CameraID: "cam-b"},
-	}
-	camSvc := &mockCameraSvc{
-		cams: map[string]*model.Camera{
-			"cam-a": {ID: "cam-a", MediaMTXPath: "path-a"},
-			"cam-b": {ID: "cam-b", MediaMTXPath: "path-b"},
-		},
-	}
-	mtx := &mockMTX{}
-	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
-
-	restored, failed := svc.RecoverRecording(context.Background())
-	if restored != 2 || failed != 0 {
-		t.Fatalf("expected (2,0), got (%d,%d)", restored, failed)
-	}
-	if len(mtx.patchPathCalls) != 2 {
-		t.Fatalf("expected 2 PatchPath calls, got %d", len(mtx.patchPathCalls))
-	}
-	for _, c := range mtx.patchPathCalls {
-		if v, ok := c.patch["record"]; !ok || v != true {
-			t.Errorf("expected record=true for %s", c.name)
-		}
 	}
 }
 
