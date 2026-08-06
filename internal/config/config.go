@@ -11,7 +11,6 @@ type Config struct {
 	Server    ServerConfig    `mapstructure:"server"`
 	CORS      CORSConfig      `mapstructure:"cors"`
 	Database  DatabaseConfig  `mapstructure:"database"`
-	Redis     RedisConfig     `mapstructure:"redis"`
 	Logger    LoggerConfig    `mapstructure:"logger"`
 	MediaMTX  MediaMTXConfig  `mapstructure:"mediamtx"`
 	Recording RecordingConfig `mapstructure:"recording"`
@@ -37,13 +36,6 @@ type DatabaseConfig struct {
 	MaxIdleConns int    `mapstructure:"max_idle_conns"`
 	MaxOpenConns int    `mapstructure:"max_open_conns"`
 	LogLevel     string `mapstructure:"log_level"`
-}
-
-type RedisConfig struct {
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	Password string `mapstructure:"password"`
-	DB       int    `mapstructure:"db"`
 }
 
 type LoggerConfig struct {
@@ -83,7 +75,6 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.max_open_conns", 50)
 	v.SetDefault("database.log_level", "info")
-	v.SetDefault("redis.db", 0)
 	v.SetDefault("recording.retention_days", 7)
 	v.SetDefault("recording.disk_watermark", 90)
 
