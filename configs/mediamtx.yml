@@ -12,7 +12,10 @@ authInternalUsers:
       - action: api
       - action: metrics
 # 录像存储到 /recordings，按 路径名/日期 分层
+# recordSegmentDuration: 每 1 分钟切一个分片，scanner 能较快收录已完成片段
 paths:
   all_others:
-    record: true
+    record: false
     recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
+    recordSegmentDuration: 1m
+    recordFormat: fmp4

@@ -19,6 +19,16 @@ type Repository interface {
 	FindByPath(filePath string) (*model.Recording, error)
 	FindOlderThan(cutoff time.Time) ([]model.Recording, error)
 	FindAllSortedByTime() ([]model.Recording, error)
+
+	// Recording session operations.
+	CreateSession(sess *model.RecordingSession) error
+	FindActiveSessions() ([]model.RecordingSession, error)
+	FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error)
+	CloseSession(id string, endTime time.Time) error
+	// FindSessionByCameraAndTime returns the session whose [start_time, end_time]
+	// interval covers the given time t. Used by scanner to link an mp4 file to its
+	// originating session. Returns gorm.ErrRecordNotFound if none matches.
+	FindSessionByCameraAndTime(cameraID string, t time.Time) (*model.RecordingSession, error)
 }
 
 type repository struct {
@@ -90,4 +100,53 @@ func (r *repository) FindAllSortedByTime() ([]model.Recording, error) {
 	var recs []model.Recording
 	err := r.db.Order("start_time ASC").Find(&recs).Error
 	return recs, err
+}
+
+// CreateSession inserts a new recording session.
+func (r *repository) CreateSession(sess *model.RecordingSession) error {
+	return r.db.Create(sess).Error
+}
+
+// FindActiveSessions returns all sessions with end_time IS NULL (currently recording).
+// Used by recovery logic to re-apply record:true after MediaMTX restart.
+func (r *repository) FindActiveSessions() ([]model.RecordingSession, error) {
+	var sessions []model.RecordingSession
+	err := r.db.Where("end_time IS NULL").Find(&sessions).Error
+	return sessions, err
+}
+
+// FindActiveSessionByCamera returns the single active session for a camera, if any.
+// If multiple exist (should not happen in normal flow), returns the latest by start_time.
+func (r *repository) FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error) {
+	var sess model.RecordingSession
+	err := r.db.Where("camera_id = ? AND end_time IS NULL", cameraID).
+		Order("start_time DESC").First(&sess).Error
+	if err != nil {
+		return nil, err
+	}
+	return &sess, nil
+}
+
+// CloseSession sets end_time on a session, marking it stopped.
+// Uses UPDATE ... WHERE end_time IS NULL to avoid closing an already-closed session.
+func (r *repository) CloseSession(id string, endTime time.Time) error {
+	res := r.db.Model(&model.RecordingSession{}).
+		Where("id = ? AND end_time IS NULL", id).
+		Updates(map[string]any{"end_time": endTime, "updated_at": endTime})
+	return res.Error
+}
+
+// FindSessionByCameraAndTime returns the session covering time t for a camera.
+// A session covers t if start_time <= t AND (end_time IS NULL OR end_time >= t).
+// If multiple match (should not happen), returns the latest by start_time.
+func (r *repository) FindSessionByCameraAndTime(cameraID string, t time.Time) (*model.RecordingSession, error) {
+	var sess model.RecordingSession
+	err := r.db.Where(
+		"camera_id = ? AND start_time <= ? AND (end_time IS NULL OR end_time >= ?)",
+		cameraID, t, t,
+	).Order("start_time DESC").First(&sess).Error
+	if err != nil {
+		return nil, err
+	}
+	return &sess, nil
 }

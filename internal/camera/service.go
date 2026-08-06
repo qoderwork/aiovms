@@ -30,6 +30,7 @@ type Service interface {
 	Discover(ctx context.Context, timeoutSec int) ([]onvif.DiscoveredDevice, error)
 	Snapshot(ctx context.Context, id string) (*SnapshotResult, error)
 	ListStatuses(ctx context.Context) ([]CameraStatus, error)
+	DeleteAll(ctx context.Context, tenantID int64) (int64, error)
 }
 
 // CameraStatus is the lightweight status view for NMS subscription.
@@ -207,6 +208,22 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	}
 	_ = s.mtx.DeletePath(cam.MediaMTXPath)
 	return s.repo.Delete(id)
+}
+
+func (s *service) DeleteAll(ctx context.Context, tenantID int64) (int64, error) {
+	cams, err := s.repo.FindAllByTenant(tenantID)
+	if err != nil {
+		return 0, apperror.Wrap(err, 50000, 500, "failed to list cameras for deletion")
+	}
+	// Best-effort delete MediaMTX paths.
+	for _, cam := range cams {
+		_ = s.mtx.DeletePath(cam.MediaMTXPath)
+	}
+	count, err := s.repo.DeleteAllByTenant(tenantID)
+	if err != nil {
+		return 0, apperror.Wrap(err, 50000, 500, "failed to delete cameras")
+	}
+	return count, nil
 }
 
 func (s *service) Connect(ctx context.Context, id string) error {

@@ -144,6 +144,56 @@
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "TenantHeader": []
+                    },
+                    {
+                        "UserHeader": []
+                    }
+                ],
+                "description": "删除当前租户下所有摄像头并批量注销 MediaMTX 路径",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "摄像头管理"
+                ],
+                "summary": "清空所有摄像头",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/utils.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "deleted": {
+                                                    "type": "integer",
+                                                    "format": "int64"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/utils.Response"
+                        }
+                    }
+                }
             }
         },
         "/cameras/batch": {

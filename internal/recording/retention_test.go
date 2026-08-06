@@ -43,6 +43,17 @@ func (m *mockRepoForRetention) FindAllSortedByTime() ([]model.Recording, error) 
 	return m.recs, nil
 }
 
+// Session methods are not exercised by retention tests; stub them to satisfy Repository.
+func (m *mockRepoForRetention) CreateSession(sess *model.RecordingSession) error                  { return nil }
+func (m *mockRepoForRetention) FindActiveSessions() ([]model.RecordingSession, error)             { return nil, nil }
+func (m *mockRepoForRetention) FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error) {
+	return nil, nil
+}
+func (m *mockRepoForRetention) CloseSession(id string, endTime time.Time) error                   { return nil }
+func (m *mockRepoForRetention) FindSessionByCameraAndTime(cameraID string, t time.Time) (*model.RecordingSession, error) {
+	return nil, nil
+}
+
 func TestCleanupByAge(t *testing.T) {
 	now := time.Now()
 

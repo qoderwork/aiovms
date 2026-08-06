@@ -1,6 +1,7 @@
 package camera
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -427,6 +428,28 @@ func (h *Handler) Status(c *gin.Context) {
 		return
 	}
 	utils.Success(c, statuses)
+}
+
+// DeleteAll godoc
+// @Summary 清空所有摄像头
+// @Description 删除当前租户下所有摄像头并批量注销 MediaMTX 路径
+// @Tags 摄像头管理
+// @Produce json
+// @Success 200 {object} utils.Response{data=object{deleted=int64}}
+// @Failure 500 {object} utils.Response
+// @Security TenantHeader
+// @Security UserHeader
+// @Router /cameras [delete]
+func (h *Handler) DeleteAll(c *gin.Context) {
+	tenantID := int64(middleware.GetTenantID(c))
+	count, err := h.svc.DeleteAll(c.Request.Context(), tenantID)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	audit.Write(middleware.GetUserID(c), "camera.delete_all", "cameras", "",
+		"deleted "+fmt.Sprintf("%d", count), tenantID)
+	utils.Success(c, gin.H{"deleted": count})
 }
 
 func parsePage(c *gin.Context) int {

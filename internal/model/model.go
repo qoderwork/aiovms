@@ -34,24 +34,43 @@ func (Camera) TableName() string { return "cameras" }
 
 // Recording represents a recorded video file on disk.
 type Recording struct {
-	ID         string    `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	CameraID   string    `gorm:"column:camera_id;type:varchar(36);index" json:"camera_id"`
-	Filename   string    `gorm:"column:filename;type:varchar(256)" json:"filename"`
-	FilePath   string    `gorm:"column:file_path;type:varchar(512);uniqueIndex" json:"file_path"`
-	FileSize   int64     `gorm:"column:file_size" json:"file_size"`
-	StartTime  time.Time `gorm:"column:start_time" json:"start_time"`
-	EndTime    time.Time `gorm:"column:end_time" json:"end_time"`
-	Duration   int       `gorm:"column:duration" json:"duration"`
-	Codec      string    `gorm:"column:codec;type:varchar(32)" json:"codec"`
-	Resolution string    `gorm:"column:resolution;type:varchar(32)" json:"resolution"`
-	Status     string    `gorm:"column:status;type:varchar(32)" json:"status"` // recording / complete / truncated
-	RecordType string    `gorm:"column:record_type;type:varchar(32)" json:"record_type"` // reserved; currently all "scheduled"
-	LicenseID  int64     `gorm:"column:license_id" json:"license_id"`
-	CreatedAt  time.Time `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt  time.Time `gorm:"column:updated_at" json:"updated_at"`
+	ID         string     `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	CameraID   string     `gorm:"column:camera_id;type:varchar(36);index" json:"camera_id"`
+	SessionID  *string    `gorm:"column:session_id;type:varchar(36);index" json:"session_id,omitempty"` // link to RecordingSession; nullable for legacy files
+	Filename   string     `gorm:"column:filename;type:varchar(256)" json:"filename"`
+	FilePath   string     `gorm:"column:file_path;type:varchar(512);uniqueIndex" json:"file_path"`
+	FileSize   int64      `gorm:"column:file_size" json:"file_size"`
+	StartTime  time.Time  `gorm:"column:start_time" json:"start_time"`
+	EndTime    time.Time  `gorm:"column:end_time" json:"end_time"`
+	Duration   int        `gorm:"column:duration" json:"duration"`
+	Codec      string     `gorm:"column:codec;type:varchar(32)" json:"codec"`
+	Resolution string     `gorm:"column:resolution;type:varchar(32)" json:"resolution"`
+	Status     string     `gorm:"column:status;type:varchar(32)" json:"status"` // recording / complete / truncated
+	RecordType string     `gorm:"column:record_type;type:varchar(32)" json:"record_type"` // reserved; currently all "scheduled"
+	LicenseID  int64      `gorm:"column:license_id" json:"license_id"`
+	CreatedAt  time.Time  `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt  time.Time  `gorm:"column:updated_at" json:"updated_at"`
 }
 
 func (Recording) TableName() string { return "recordings" }
+
+// RecordingSession represents a recording intent: one Start → Stop lifecycle.
+// Multiple mp4 segments (Recording rows) produced during the session share the
+// same SessionID. end_time IS NULL means the session is active (currently recording).
+// This is the source of truth for restoring recording state after MediaMTX restart.
+type RecordingSession struct {
+	ID          string     `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	CameraID    string     `gorm:"column:camera_id;type:varchar(36);index" json:"camera_id"`
+	TriggerType string     `gorm:"column:trigger_type;type:varchar(16)" json:"trigger_type"` // manual / schedule
+	ScheduleID  *string    `gorm:"column:schedule_id;type:varchar(36);index" json:"schedule_id,omitempty"` // set when trigger_type=schedule
+	StartTime   time.Time  `gorm:"column:start_time" json:"start_time"`
+	EndTime     *time.Time `gorm:"column:end_time;index" json:"end_time,omitempty"` // NULL = active
+	LicenseID   int64      `gorm:"column:license_id" json:"license_id"`
+	CreatedAt   time.Time  `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at" json:"updated_at"`
+}
+
+func (RecordingSession) TableName() string { return "recording_sessions" }
 
 // RecordSchedule defines a recurring recording plan for a camera.
 type RecordSchedule struct {

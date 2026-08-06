@@ -1,6 +1,7 @@
 package camera
 
 import (
+	"context"
 	"net"
 	"strconv"
 	"sync"
@@ -13,12 +14,28 @@ const (
 	statusInterval = 30 * time.Second
 )
 
+// mtxHealthChecker is the minimal MediaMTX health API needed by StatusChecker.
+type mtxHealthChecker interface {
+	HealthCheck() error
+}
+
+// RecoveryHook is invoked once when MediaMTX transitions from down→up.
+// The recording service registers its RecoverRecording method here.
+type RecoveryHook func(ctx context.Context)
+
 // StatusChecker periodically pings camera IPs and updates their online/offline status.
+// It also polls MediaMTX health; on a down→up transition it triggers the registered
+// RecoveryHook so the recording service can re-apply record:true for active sessions.
 // NMS queries camera status from DB directly.
 type StatusChecker struct {
 	repo     Repository
+	mtx      mtxHealthChecker
+	recover  RecoveryHook
 	stopCh   chan struct{}
 	stopOnce sync.Once
+
+	// mtxDown tracks the last observed MediaMTX state to detect transitions.
+	mtxDown bool
 }
 
 func NewStatusChecker(repo Repository) *StatusChecker {
@@ -26,6 +43,14 @@ func NewStatusChecker(repo Repository) *StatusChecker {
 		repo:   repo,
 		stopCh: make(chan struct{}),
 	}
+}
+
+// WithMediaMTXHealth enables MediaMTX health monitoring on this StatusChecker.
+// When MTX transitions from down→up, the recover hook is invoked once.
+func (sc *StatusChecker) WithMediaMTXHealth(mtx mtxHealthChecker, recover RecoveryHook) *StatusChecker {
+	sc.mtx = mtx
+	sc.recover = recover
+	return sc
 }
 
 func (sc *StatusChecker) Run() {
@@ -39,6 +64,7 @@ func (sc *StatusChecker) Run() {
 		select {
 		case <-ticker.C:
 			sc.checkAll()
+			sc.checkMediaMTX()
 		case <-sc.stopCh:
 			logger.Info("camera status checker stopped")
 			return
@@ -66,6 +92,25 @@ func (sc *StatusChecker) checkAll() {
 			_ = sc.repo.UpdateStatus(cam.ID, newStatus)
 		}
 	}
+}
+
+// checkMediaMTX probes MediaMTX health and fires the recovery hook on down→up.
+// Safe to call when MTX monitoring is not configured (no-op).
+func (sc *StatusChecker) checkMediaMTX() {
+	if sc.mtx == nil || sc.recover == nil {
+		return
+	}
+	err := sc.mtx.HealthCheck()
+	nowDown := err != nil
+
+	if nowDown && !sc.mtxDown {
+		logger.Warnf("status checker: mediamtx went down: %v", err)
+	}
+	if !nowDown && sc.mtxDown {
+		logger.Info("status checker: mediamtx recovered, triggering recording recovery")
+		sc.recover(context.Background())
+	}
+	sc.mtxDown = nowDown
 }
 
 // probeCamera checks if a camera is reachable via TCP on its RTSP port.

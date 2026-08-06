@@ -70,6 +70,30 @@ func (c *Client) ListPaths() ([]PathInfo, error) {
 	return result.Items, nil
 }
 
+// ListConfigPaths returns all configured path names from MediaMTX.
+func (c *Client) ListConfigPaths() ([]string, error) {
+	url := fmt.Sprintf("%s/v3/config/paths/list", c.baseURL)
+	resp, err := c.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("list config paths: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Items []struct {
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode config paths: %w", err)
+	}
+	names := make([]string, 0, len(result.Items))
+	for _, item := range result.Items {
+		names = append(names, item.Name)
+	}
+	return names, nil
+}
+
 // SnapshotPath returns the URL for fetching a JPEG snapshot from a path.
 // MediaMTX serves JPEG frames directly at the stream root path.
 func (c *Client) SnapshotPath(name string) string {

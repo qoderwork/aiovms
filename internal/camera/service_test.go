@@ -78,6 +78,12 @@ func (m *mockRepo) Delete(id string) error {
 	return nil
 }
 func (m *mockRepo) FindAllByTenant(_ int64) ([]model.Camera, error) { return nil, nil }
+func (m *mockRepo) DeleteAllByTenant(_ int64) (int64, error)       { return 0, nil }
+func (m *mockRepo) ExistsByIPPort(_ int64, _ string, _ int, _ string) (bool, error) {
+	return false, nil
+}
+func (m *mockRepo) ExistsByName(_ int64, _ string, _ string) (bool, error)    { return false, nil }
+func (m *mockRepo) ExistsByStreamURL(_ int64, _ string, _ string) (bool, error) { return false, nil }
 func (m *mockRepo) FindAll() ([]model.Camera, error) {
 	if m.findAllErr != nil {
 		return nil, m.findAllErr
@@ -177,6 +183,9 @@ func TestServiceCreate(t *testing.T) {
 	err := svc.Create(context.Background(), &model.Camera{
 		Name:     "new-cam",
 		IP:       "192.168.1.100",
+		Port:     554,
+		Protocol: "RTSP",
+		StreamURL: "rtsp://192.168.1.100/stream",
 		Password: "secret123",
 	})
 	if err != nil {
@@ -217,6 +226,9 @@ func TestServiceUpdate(t *testing.T) {
 	err := svc.Update(context.Background(), "id-1", &model.Camera{
 		Name:     "new-name",
 		IP:       "10.0.0.2",
+		Port:     554,
+		Protocol: "RTSP",
+		StreamURL: "rtsp://10.0.0.2/stream",
 		Password: "newpass",
 	})
 	if err != nil {

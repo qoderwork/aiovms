@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -84,7 +85,8 @@ func main() {
 
 	// 3. AutoMigrate VMS tables only
 	if err := database.AutoMigrate(db,
-		&model.Camera{}, &model.Recording{}, &model.RecordSchedule{}, &model.VMSAuditLog{},
+		&model.Camera{}, &model.Recording{}, &model.RecordingSession{},
+		&model.RecordSchedule{}, &model.VMSAuditLog{},
 	); err != nil {
 		logger.Fatalf("auto migrate: %v", err)
 	}
@@ -113,8 +115,12 @@ func main() {
 	schRepo := schedule.NewRepository(db)
 	schSvc := schedule.NewService(schRepo, camRepo, mtxClient)
 
-	// 9. Re-register all cameras with MediaMTX on startup
-	registerAllCameras(camRepo, mtxClient)
+	// 9. Sync cameras with MediaMTX on startup (bidirectional)
+	syncCamerasWithMediaMTX(camRepo, mtxClient)
+
+	// 9b. Restore recording state for sessions active before VMS/MTX restart.
+	//     Queries recording_sessions with end_time IS NULL and re-applies record:true.
+	recSvc.RecoverRecording(context.Background())
 
 	// 10. Start background workers
 	var wg sync.WaitGroup
@@ -128,7 +134,12 @@ func main() {
 	wg.Add(1)
 	go func() { defer wg.Done(); retention.Run() }()
 
-	statusChecker := camera.NewStatusChecker(camRepo)
+	// StatusChecker also monitors MediaMTX health: on down→up transition it
+	// invokes recSvc.RecoverRecording to resume recording for active sessions.
+	statusChecker := camera.NewStatusChecker(camRepo).
+		WithMediaMTXHealth(mtxClient, func(ctx context.Context) {
+			recSvc.RecoverRecording(ctx)
+		})
 	wg.Add(1)
 	go func() { defer wg.Done(); statusChecker.Run() }()
 
@@ -227,24 +238,52 @@ func main() {
 	logger.Info("server stopped")
 }
 
-// registerAllCameras registers all stored cameras with MediaMTX on startup
-// and marks their status as "connecting" until StatusChecker probes online.
-func registerAllCameras(camRepo camera.Repository, mtx *mediamtx.Client) {
+// syncCamerasWithMediaMTX performs a bidirectional sync on startup:
+//  1. Register all DB cameras into MediaMTX (delete-then-add for idempotency).
+//  2. Remove orphaned cam-* paths in MediaMTX that no longer exist in DB.
+func syncCamerasWithMediaMTX(camRepo camera.Repository, mtx *mediamtx.Client) {
 	cams, err := camRepo.FindAll()
 	if err != nil {
-		logger.Errorf("startup: load cameras: %v", err)
+		logger.Errorf("startup sync: load cameras: %v", err)
 		return
 	}
+
+	// 1. DB → MediaMTX: re-register all cameras (idempotent).
+	dbPaths := make(map[string]bool, len(cams))
 	for _, cam := range cams {
+		dbPaths[cam.MediaMTXPath] = true
+		// Delete first to ensure idempotent re-add (handles stale config).
+		_ = mtx.DeletePath(cam.MediaMTXPath)
 		if err := mtx.AddPath(cam.MediaMTXPath, mediamtx.PathConfig{
 			Source:         cam.StreamURL,
 			SourceOnDemand: true,
 		}); err != nil {
-			logger.Warnf("startup: register camera %s: %v", cam.ID, err)
+			logger.Warnf("startup sync: register camera %s (%s): %v", cam.ID, cam.MediaMTXPath, err)
 		}
 		if err := camRepo.UpdateStatus(cam.ID, "connecting"); err != nil {
-			logger.Warnf("startup: set connecting for camera %s: %v", cam.ID, err)
+			logger.Warnf("startup sync: set connecting for camera %s: %v", cam.ID, err)
 		}
 	}
-	logger.Infof("startup: registered %d cameras with MediaMTX", len(cams))
+
+	// 2. MediaMTX → DB: remove orphaned cam-* paths.
+	mtxPaths, err := mtx.ListConfigPaths()
+	if err != nil {
+		logger.Warnf("startup sync: list mediamtx paths: %v", err)
+		logger.Infof("startup sync: registered %d cameras with MediaMTX (orphan cleanup skipped)", len(cams))
+		return
+	}
+	removed := 0
+	for _, name := range mtxPaths {
+		if !strings.HasPrefix(name, "cam-") {
+			continue // skip non-camera paths (e.g. all_others)
+		}
+		if !dbPaths[name] {
+			if err := mtx.DeletePath(name); err != nil {
+				logger.Warnf("startup sync: remove orphan path %s: %v", name, err)
+			} else {
+				removed++
+			}
+		}
+	}
+	logger.Infof("startup sync: registered %d cameras, removed %d orphan paths", len(cams), removed)
 }

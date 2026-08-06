@@ -21,6 +21,11 @@ type Service interface {
 	StartManual(ctx context.Context, cameraID string) error
 	StopManual(ctx context.Context, cameraID string) error
 	Upsert(ctx context.Context, rec *model.Recording) error
+
+	// RecoverRecording re-applies record:true to MediaMTX paths for all sessions
+	// currently active (end_time IS NULL). Called after MediaMTX restart or VMS startup.
+	// Uses the camera cache (camSvc) to resolve MediaMTXPath per camera_id.
+	RecoverRecording(ctx context.Context) (restored int, failed int)
 }
 
 // mediaMTXClient abstracts MediaMTX API for testability.
@@ -85,7 +90,37 @@ func (s *service) StartManual(ctx context.Context, cameraID string) error {
 	if err != nil {
 		return apperror.ErrCameraNotFound
 	}
-	return s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true})
+
+	// Close any pre-existing active session for this camera (defensive: should not happen
+	// in normal flow, but guards against duplicate sessions if a previous Stop failed).
+	if existing, err := s.repo.FindActiveSessionByCamera(cameraID); err == nil && existing != nil {
+		logger.Warnf("start manual: found stale active session %s for camera %s, closing", existing.ID, cameraID)
+		_ = s.repo.CloseSession(existing.ID, time.Now())
+	}
+
+	// 1. Patch MediaMTX first: if it fails, we don't create a dangling session.
+	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true}); err != nil {
+		return err
+	}
+
+	// 2. Create session record (end_time IS NULL = active).
+	now := time.Now()
+	sess := &model.RecordingSession{
+		ID:          uuid.NewString(),
+		CameraID:    cameraID,
+		TriggerType: "manual",
+		StartTime:   now,
+		LicenseID:   cam.LicenseID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.repo.CreateSession(sess); err != nil {
+		// Best-effort rollback: disable recording to avoid a recording without a session.
+		logger.Errorf("start manual: create session for camera %s: %v (rolling back mediamtx)", cameraID, err)
+		_ = s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": false})
+		return apperror.Wrap(err, 50000, 500, "failed to create recording session")
+	}
+	return nil
 }
 
 func (s *service) StopManual(ctx context.Context, cameraID string) error {
@@ -93,11 +128,62 @@ func (s *service) StopManual(ctx context.Context, cameraID string) error {
 	if err != nil {
 		return apperror.ErrCameraNotFound
 	}
-	return s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": false})
+
+	// 1. Stop MediaMTX recording first (idempotent: safe even if not recording).
+	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": false}); err != nil {
+		return err
+	}
+
+	// 2. Close active session if exists (set end_time).
+	sess, err := s.repo.FindActiveSessionByCamera(cameraID)
+	if err != nil {
+		// No active session — nothing to close. Not an error.
+		return nil
+	}
+	if err := s.repo.CloseSession(sess.ID, time.Now()); err != nil {
+		logger.Errorf("stop manual: close session %s for camera %s: %v", sess.ID, cameraID, err)
+		return apperror.Wrap(err, 50000, 500, "failed to close recording session")
+	}
+	return nil
+}
+
+// RecoverRecording re-applies record:true for all sessions with end_time IS NULL.
+// Called after MediaMTX becomes reachable again (startup or runtime down→up).
+// Returns (restored, failed) counts for logging.
+func (s *service) RecoverRecording(ctx context.Context) (restored int, failed int) {
+	sessions, err := s.repo.FindActiveSessions()
+	if err != nil {
+		logger.Errorf("recover recording: list active sessions: %v", err)
+		return 0, 0
+	}
+	if len(sessions) == 0 {
+		logger.Info("recover recording: no active sessions to restore")
+		return 0, 0
+	}
+
+	for _, sess := range sessions {
+		cam, err := s.camSvc.Get(ctx, sess.CameraID)
+		if err != nil {
+			logger.Warnf("recover recording: camera %s not found for session %s: %v", sess.CameraID, sess.ID, err)
+			failed++
+			continue
+		}
+		if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true}); err != nil {
+			logger.Errorf("recover recording: patch %s for camera %s: %v", cam.MediaMTXPath, sess.CameraID, err)
+			failed++
+			continue
+		}
+		restored++
+	}
+	logger.Infof("recover recording: restored %d, failed %d (total active sessions: %d)", restored, failed, len(sessions))
+	return restored, failed
 }
 
 // Upsert creates or updates a recording record (called by file scanner).
 // Uses ON DUPLICATE KEY UPDATE for atomicity.
+// If rec.SessionID is unset, attempts to link to the originating session by
+// (camera_id, start_time) interval. Failure to find a session is non-fatal
+// (legacy files or files produced before sessions existed).
 func (s *service) Upsert(ctx context.Context, rec *model.Recording) error {
 	if rec.ID == "" {
 		rec.ID = uuid.NewString()
@@ -105,5 +191,13 @@ func (s *service) Upsert(ctx context.Context, rec *model.Recording) error {
 	now := time.Now()
 	rec.CreatedAt = now
 	rec.UpdatedAt = now
+
+	if rec.SessionID == nil || *rec.SessionID == "" {
+		if sess, err := s.repo.FindSessionByCameraAndTime(rec.CameraID, rec.StartTime); err == nil && sess != nil {
+			sid := sess.ID
+			rec.SessionID = &sid
+		}
+	}
+
 	return s.repo.Upsert(rec)
 }

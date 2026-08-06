@@ -20,6 +20,14 @@ type mockRepo struct {
 
 	lastDeleted *model.Recording
 	lastUpserted *model.Recording
+
+	// session mock state
+	activeSessions      []model.RecordingSession
+	createSessionErr    error
+	findActiveErr       error
+	lastCreatedSession  *model.RecordingSession
+	lastClosedSessionID string
+	lastClosedAt        time.Time
 }
 
 func newMockRepo() *mockRepo {
@@ -67,6 +75,35 @@ func (m *mockRepo) Delete(rec *model.Recording) error {
 func (m *mockRepo) FindByPath(filePath string) (*model.Recording, error) { return nil, nil }
 func (m *mockRepo) FindOlderThan(cutoff time.Time) ([]model.Recording, error) { return nil, nil }
 func (m *mockRepo) FindAllSortedByTime() ([]model.Recording, error) { return nil, nil }
+
+// --- session mock impl ---
+
+func (m *mockRepo) CreateSession(sess *model.RecordingSession) error {
+	if m.createSessionErr != nil {
+		return m.createSessionErr
+	}
+	m.lastCreatedSession = sess
+	return nil
+}
+func (m *mockRepo) FindActiveSessions() ([]model.RecordingSession, error) {
+	return m.activeSessions, m.findActiveErr
+}
+func (m *mockRepo) FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error) {
+	for i := range m.activeSessions {
+		if m.activeSessions[i].CameraID == cameraID {
+			return &m.activeSessions[i], nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+func (m *mockRepo) CloseSession(id string, endTime time.Time) error {
+	m.lastClosedSessionID = id
+	m.lastClosedAt = endTime
+	return nil
+}
+func (m *mockRepo) FindSessionByCameraAndTime(cameraID string, t time.Time) (*model.RecordingSession, error) {
+	return nil, errors.New("not found")
+}
 
 type mockCameraSvc struct {
 	cams  map[string]*model.Camera
@@ -175,7 +212,7 @@ func TestRecordingStartManual(t *testing.T) {
 	repo := newMockRepo()
 	camSvc := &mockCameraSvc{
 		cams: map[string]*model.Camera{
-			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1"},
+			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 		},
 	}
 	mtx := &mockMTX{}
@@ -195,6 +232,16 @@ func TestRecordingStartManual(t *testing.T) {
 	if v, ok := call.patch["record"]; !ok || v != true {
 		t.Error("expected patch record=true")
 	}
+	// Session should be created with trigger_type=manual and no end_time.
+	if repo.lastCreatedSession == nil {
+		t.Fatal("expected session created")
+	}
+	if repo.lastCreatedSession.TriggerType != "manual" {
+		t.Errorf("trigger = %q", repo.lastCreatedSession.TriggerType)
+	}
+	if repo.lastCreatedSession.EndTime != nil {
+		t.Error("expected end_time nil for active session")
+	}
 }
 
 func TestRecordingStartManualCameraNotFound(t *testing.T) {
@@ -210,6 +257,9 @@ func TestRecordingStartManualCameraNotFound(t *testing.T) {
 
 func TestRecordingStopManual(t *testing.T) {
 	repo := newMockRepo()
+	repo.activeSessions = []model.RecordingSession{
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
+	}
 	camSvc := &mockCameraSvc{
 		cams: map[string]*model.Camera{
 			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1"},
@@ -227,6 +277,40 @@ func TestRecordingStopManual(t *testing.T) {
 	}
 	if v, ok := mtx.patchPathCalls[0].patch["record"]; !ok || v != false {
 		t.Error("expected patch record=false")
+	}
+	if repo.lastClosedSessionID != "ses-1" {
+		t.Errorf("expected session ses-1 closed, got %q", repo.lastClosedSessionID)
+	}
+}
+
+// TestRecordingRecover verifies that RecoverRecording re-applies record:true
+// for all active sessions (end_time IS NULL) — the core of MTX restart recovery.
+func TestRecordingRecover(t *testing.T) {
+	repo := newMockRepo()
+	repo.activeSessions = []model.RecordingSession{
+		{ID: "ses-1", CameraID: "cam-a"},
+		{ID: "ses-2", CameraID: "cam-b"},
+	}
+	camSvc := &mockCameraSvc{
+		cams: map[string]*model.Camera{
+			"cam-a": {ID: "cam-a", MediaMTXPath: "path-a"},
+			"cam-b": {ID: "cam-b", MediaMTXPath: "path-b"},
+		},
+	}
+	mtx := &mockMTX{}
+	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
+
+	restored, failed := svc.RecoverRecording(context.Background())
+	if restored != 2 || failed != 0 {
+		t.Fatalf("expected (2,0), got (%d,%d)", restored, failed)
+	}
+	if len(mtx.patchPathCalls) != 2 {
+		t.Fatalf("expected 2 PatchPath calls, got %d", len(mtx.patchPathCalls))
+	}
+	for _, c := range mtx.patchPathCalls {
+		if v, ok := c.patch["record"]; !ok || v != true {
+			t.Errorf("expected record=true for %s", c.name)
+		}
 	}
 }
 

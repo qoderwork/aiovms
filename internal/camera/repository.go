@@ -18,6 +18,7 @@ type Repository interface {
 	ExistsByIPPort(tenantID int64, ip string, port int, excludeID string) (bool, error)
 	ExistsByName(tenantID int64, name string, excludeID string) (bool, error)
 	ExistsByStreamURL(tenantID int64, streamURL string, excludeID string) (bool, error)
+	DeleteAllByTenant(tenantID int64) (int64, error)
 }
 
 type repository struct {
@@ -97,4 +98,9 @@ func (r *repository) ExistsByStreamURL(tenantID int64, streamURL string, exclude
 	}
 	err := q.Count(&count).Error
 	return count > 0, err
+}
+
+func (r *repository) DeleteAllByTenant(tenantID int64) (int64, error) {
+	res := r.db.Where("license_id = ?", tenantID).Delete(&model.Camera{})
+	return res.RowsAffected, res.Error
 }
