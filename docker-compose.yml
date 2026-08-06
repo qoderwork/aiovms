@@ -56,7 +56,7 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      VMS_ENCRYPTION_KEY: "change-me-to-a-32-byte-secret!!"  # 生产环境需替换为强密钥
+      VMS_ENCRYPTION_KEY: "change-me-to-a-32-byte-strong-secret-key-123"  # 生产环境需替换为强密钥（≥32字节）
     ports:
       - "8081:8081"
     volumes:
