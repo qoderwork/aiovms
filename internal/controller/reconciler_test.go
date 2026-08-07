@@ -195,7 +195,7 @@ func newTestReconciler() (*Reconciler, *mockCameraRepo, *mockScheduleRepo, *mock
 	mtx := &mockMTXClient{
 		pathConfigs: make(map[string]mediamtx.PathConfigItem),
 	}
-	r := NewReconciler(camRepo, schRepo, recRepo, mtx)
+	r := NewReconciler(camRepo, schRepo, recRepo, mtx, "/recordings", "1h")
 	return r, camRepo, schRepo, recRepo, mtx
 }
 
@@ -288,28 +288,32 @@ func TestReconcileStreams_DetectsSourceDrift(t *testing.T) {
 	}
 }
 
-func TestReconcileStreams_DetectsSourceOnDemandDrift(t *testing.T) {
+// TestReconcileStreams_SkipsSourceOnDemandFalse verifies that sourceOnDemand=false does NOT
+// trigger drift detection. sourceOnDemand is dynamically managed by recording logic
+// (false while recording, true otherwise), so reconcileStreams must only compare source URLs.
+func TestReconcileStreams_SkipsSourceOnDemandFalse(t *testing.T) {
 	r, camRepo, _, _, mtx := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", StreamURL: "rtsp://1.2.3.4/stream"},
 	}
-	// Source matches but SourceOnDemand is wrong
+	// Source matches, but SourceOnDemand=false (e.g. during recording).
+	// This is NOT drift — reconcileRecording manages sourceOnDemand separately.
 	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:           "cam-cam-1",
 		Source:         "rtsp://1.2.3.4/stream",
-		SourceOnDemand: false, // drift! should be true
+		SourceOnDemand: false,
 	}
 
 	r.reconcileStreams(mtx.pathConfigs)
 
-	if len(mtx.deletePathCalls) != 1 {
-		t.Fatalf("expected 1 DeletePath call for drift, got %d", len(mtx.deletePathCalls))
+	if len(mtx.deletePathCalls) != 0 {
+		t.Errorf("expected 0 DeletePath calls (sourceOnDemand drift is not checked), got %d", len(mtx.deletePathCalls))
 	}
-	if len(mtx.addPathCalls) != 1 {
-		t.Fatalf("expected 1 AddPath call after drift, got %d", len(mtx.addPathCalls))
+	if len(mtx.addPathCalls) != 0 {
+		t.Errorf("expected 0 AddPath calls (sourceOnDemand=false is not drift), got %d", len(mtx.addPathCalls))
 	}
-	if !mtx.addPathCalls[0].cfg.SourceOnDemand {
-		t.Error("expected SourceOnDemand=true in re-added path")
+	if len(camRepo.updatedIDs) != 0 {
+		t.Errorf("expected no status update, got %v", camRepo.updatedIDs)
 	}
 }
 

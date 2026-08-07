@@ -119,7 +119,10 @@ func (s *service) StartManual(ctx context.Context, cameraID string) error {
 	if err := s.repo.CreateSession(sess); err != nil {
 		// Best-effort rollback: disable recording to avoid a recording without a session.
 		logger.Errorf("start manual: create session for camera %s: %v (rolling back mediamtx)", cameraID, err)
-		_ = s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": false})
+		_ = s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
+			"record":         false,
+			"sourceOnDemand": true,
+		})
 		return apperror.Wrap(err, 50000, 500, "failed to create recording session")
 	}
 	return nil
