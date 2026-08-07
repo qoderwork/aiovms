@@ -122,6 +122,7 @@ func (s *service) Create(ctx context.Context, cam *model.Camera) error {
 		return apperror.Wrap(err, 50000, 500, "failed to create camera")
 	}
 
+	// 一期仅注册主码流（stream_url）到 MediaMTX；sub_stream_url 暂未注册，二期实现子码流预览/录制时启用。
 	if err := s.mtx.AddPath(cam.MediaMTXPath, mediamtx.PathConfig{
 		Source:         cam.StreamURL,
 		SourceOnDemand: true,
@@ -190,6 +191,7 @@ func (s *service) Update(ctx context.Context, id string, cam *model.Camera) erro
 		return apperror.Wrap(err, 50000, 500, "failed to update camera")
 	}
 
+	// 重新注册主码流（一期不注册子码流）
 	if err := s.mtx.AddPath(existing.MediaMTXPath, mediamtx.PathConfig{
 		Source:         existing.StreamURL,
 		SourceOnDemand: true,

@@ -100,6 +100,14 @@ func (m *mockRepo) UpdateStatus(id string, status string) error {
 	}
 	return nil
 }
+func (m *mockRepo) FindByMediaMTXPath(path string) (*model.Camera, error) {
+	for _, c := range m.cams {
+		if c.MediaMTXPath == path {
+			return c, nil
+		}
+	}
+	return nil, errors.New("not found")
+}
 
 type mockMTX struct {
 	addPathCalls    []struct{ name string; cfg mediamtx.PathConfig }

@@ -15,10 +15,18 @@ import (
 	"aiovms/pkg/logger"
 )
 
+// CameraLookup resolves a MediaMTX path name (e.g. "cam-a1b2c3d4") to the full
+// Camera record. Used by Scanner to map recording file directories back to
+// the canonical camera UUID.
+type CameraLookup interface {
+	FindByMediaMTXPath(path string) (*model.Camera, error)
+}
+
 // Scanner periodically scans the recording directory for new/updated fMP4 files,
 // extracts metadata via mediaprobe, and upserts into the database.
 type Scanner struct {
 	svc        Service
+	camLookup  CameraLookup
 	recordPath string
 	interval   time.Duration
 	stopCh     chan struct{}
@@ -26,9 +34,10 @@ type Scanner struct {
 }
 
 // NewScanner creates a recording file scanner.
-func NewScanner(svc Service, recordPath string) *Scanner {
+func NewScanner(svc Service, recordPath string, camLookup CameraLookup) *Scanner {
 	return &Scanner{
 		svc:        svc,
+		camLookup:  camLookup,
 		recordPath: recordPath,
 		interval:   30 * time.Second,
 		stopCh:     make(chan struct{}),
@@ -81,10 +90,16 @@ func (s *Scanner) scan() {
 			return nil
 		}
 
-		// Camera ID is the parent directory name
-		cameraID := filepath.Base(filepath.Dir(path))
+		// Parent directory is the MediaMTX path name (e.g. "cam-a1b2c3d4").
+		// Resolve it to the full camera UUID via DB lookup.
+		mtxPath := filepath.Base(filepath.Dir(path))
+		cam, err := s.camLookup.FindByMediaMTXPath(mtxPath)
+		if err != nil {
+			logger.Warnf("scanner: no camera found for path %q (file %s), skipping", mtxPath, path)
+			return nil
+		}
 
-		rec, err := s.probeAndCreate(path, cameraID, info)
+		rec, err := s.probeAndCreate(path, cam, mtxPath, info)
 		if err != nil {
 			logger.Debugf("scanner: probe %s: %v", path, err)
 			return nil
@@ -102,7 +117,7 @@ func (s *Scanner) scan() {
 	}
 }
 
-func (s *Scanner) probeAndCreate(path, cameraID string, info os.FileInfo) (*model.Recording, error) {
+func (s *Scanner) probeAndCreate(path string, cam *model.Camera, mtxPath string, info os.FileInfo) (*model.Recording, error) {
 	mi, err := mediaprobe.ProbeMP4(path)
 	if err != nil {
 		return nil, err
@@ -128,19 +143,21 @@ func (s *Scanner) probeAndCreate(path, cameraID string, info os.FileInfo) (*mode
 	}
 
 	return &model.Recording{
-		ID:         uuid.NewString(),
-		CameraID:   cameraID,
-		Filename:   info.Name(),
-		FilePath:   path,
-		FileSize:   info.Size(),
-		StartTime:  startTime,
-		EndTime:    endTime,
-		Duration:   durationSec,
-		Codec:      mi.CodecName,
-		Resolution: formatResolution(mi.Width, mi.Height),
-		Status:     status,
-		RecordType: "scheduled",
-		CreatedAt:  time.Now(),
+		ID:           uuid.NewString(),
+		CameraID:     cam.ID,
+		MediaMTXPath: mtxPath,
+		Filename:     info.Name(),
+		FilePath:     path,
+		FileSize:     info.Size(),
+		StartTime:    startTime,
+		EndTime:      endTime,
+		Duration:     durationSec,
+		Codec:        mi.CodecName,
+		Resolution:   formatResolution(mi.Width, mi.Height),
+		Status:       status,
+		RecordType:   "scheduled",
+		LicenseID:    cam.LicenseID,
+		CreatedAt:    time.Now(),
 	}, nil
 }
 

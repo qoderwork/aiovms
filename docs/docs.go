@@ -1213,7 +1213,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/model.RecordSchedule"
+                            "$ref": "#/definitions/schedule.CreateScheduleRequest"
                         }
                     }
                 ],
@@ -1286,7 +1286,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/model.RecordSchedule"
+                            "$ref": "#/definitions/schedule.UpdateScheduleRequest"
                         }
                     }
                 ],
@@ -1657,7 +1657,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "stream_type": {
-                    "description": "main / sub",
+                    "description": "main / sub — 一期预留，暂不生效，录像始终用主码流",
                     "type": "string"
                 },
                 "updated_at": {
@@ -1702,11 +1702,19 @@ const docTemplate = `{
                 "license_id": {
                     "type": "integer"
                 },
+                "media_mtx_path": {
+                    "description": "MediaMTX path name (e.g. \"cam-a1b2c3d4\"), used for playback URL",
+                    "type": "string"
+                },
                 "record_type": {
                     "description": "reserved; currently all \"scheduled\"",
                     "type": "string"
                 },
                 "resolution": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "description": "link to RecordingSession; nullable for legacy files",
                     "type": "string"
                 },
                 "start_time": {
@@ -1750,6 +1758,69 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "schedule.CreateScheduleRequest": {
+            "type": "object",
+            "required": [
+                "camera_id"
+            ],
+            "properties": {
+                "camera_id": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "end_time": {
+                    "description": "\"20:00\"",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "start_time": {
+                    "description": "\"08:00\"",
+                    "type": "string"
+                },
+                "stream_type": {
+                    "description": "main / sub — 一期预留，暂不生效，录像始终用主码流",
+                    "type": "string"
+                },
+                "weekdays": {
+                    "description": "\"1,2,3,4,5\" (Sun=0)",
+                    "type": "string"
+                }
+            }
+        },
+        "schedule.UpdateScheduleRequest": {
+            "type": "object",
+            "required": [
+                "camera_id"
+            ],
+            "properties": {
+                "camera_id": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "end_time": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "start_time": {
+                    "type": "string"
+                },
+                "stream_type": {
+                    "description": "main / sub — 一期预留，暂不生效",
+                    "type": "string"
+                },
+                "weekdays": {
+                    "type": "string"
                 }
             }
         },

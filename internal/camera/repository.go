@@ -10,6 +10,7 @@ type Repository interface {
 	Create(cam *model.Camera) error
 	Update(cam *model.Camera) error
 	FindByID(id string) (*model.Camera, error)
+	FindByMediaMTXPath(path string) (*model.Camera, error)
 	ListByTenant(tenantID int64, query string, offset, limit int) ([]model.Camera, int64, error)
 	Delete(id string) error
 	FindAllByTenant(tenantID int64) ([]model.Camera, error)
@@ -54,6 +55,15 @@ func (r *repository) FindAll() ([]model.Camera, error) {
 	var cams []model.Camera
 	err := r.db.Find(&cams).Error
 	return cams, err
+}
+
+func (r *repository) FindByMediaMTXPath(path string) (*model.Camera, error) {
+	var cam model.Camera
+	err := r.db.Where("media_mtx_path = ?", path).First(&cam).Error
+	if err != nil {
+		return nil, err
+	}
+	return &cam, nil
 }
 
 func (r *repository) Delete(id string) error {

@@ -165,7 +165,7 @@ func TestRecordingList(t *testing.T) {
 func TestRecordingGet(t *testing.T) {
 	repo := newMockRepo()
 	repo.recs["r1"] = &model.Recording{
-		ID: "r1", CameraID: "cam-1", Filename: "test.mp4",
+		ID: "r1", CameraID: "cam-1", MediaMTXPath: "cam-1", Filename: "test.mp4",
 	}
 	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
 

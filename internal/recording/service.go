@@ -55,8 +55,10 @@ func (s *service) Get(ctx context.Context, id string) (*model.Recording, string,
 	if err != nil {
 		return nil, "", apperror.ErrRecordingNotFound
 	}
-	// Playback URL served by Nginx from /recordings/ path
-	playURL := fmt.Sprintf("/recordings/%s/%s", rec.CameraID, rec.Filename)
+	// Playback URL served by Nginx from /recordings/ path.
+	// Uses MediaMTXPath (e.g. "cam-a1b2c3d4") which matches the physical directory
+	// structure, NOT the full camera UUID.
+	playURL := fmt.Sprintf("/recordings/%s/%s", rec.MediaMTXPath, rec.Filename)
 	return rec, playURL, nil
 }
 
@@ -94,6 +96,7 @@ func (s *service) StartManual(ctx context.Context, cameraID string) error {
 	}
 
 	// 1. Patch MediaMTX first: if it fails, we don't create a dangling session.
+//    注意：一期录像始终使用主码流（cam.MediaMTXPath），stream_type 暂不生效。
 	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true}); err != nil {
 		return err
 	}

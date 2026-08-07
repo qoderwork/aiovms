@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"aiovms/pkg/logger"
+	"aiovms/pkg/metrics"
 )
 
 // Client provides a Go client for MediaMTX v3 HTTP API (v1.20.0).
@@ -150,17 +151,24 @@ func (c *Client) HealthCheck() error {
 }
 
 func (c *Client) do(req *http.Request) error {
+	start := time.Now()
 	resp, err := c.httpClient.Do(req)
+	status := "ok"
 	if err != nil {
+		status = "error"
+		metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, status).Observe(time.Since(start).Seconds())
 		return fmt.Errorf("mediamtx request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
+		status = "error"
 		body, _ := io.ReadAll(resp.Body)
 		logger.Errorf("mediamtx %s %s -> %d: %s", req.Method, req.URL.Path, resp.StatusCode, string(body))
+		metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, status).Observe(time.Since(start).Seconds())
 		return fmt.Errorf("mediamtx error %d: %s", resp.StatusCode, string(body))
 	}
+	metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, status).Observe(time.Since(start).Seconds())
 	return nil
 }
 

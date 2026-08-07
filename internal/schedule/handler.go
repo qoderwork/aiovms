@@ -17,27 +17,29 @@ import (
 // CreatedAt, UpdatedAt) are excluded and set by handler / service.
 // ---------------------------------------------------------------------------
 
-type createScheduleRequest struct {
+// CreateScheduleRequest is the DTO for creating a recording schedule.
+type CreateScheduleRequest struct {
 	CameraID   string `json:"camera_id" binding:"required"`
 	Name       string `json:"name"`
 	Enabled    bool   `json:"enabled"`
 	Weekdays   string `json:"weekdays"`   // "1,2,3,4,5" (Sun=0)
-	StreamType string `json:"stream_type"` // main / sub
+	StreamType string `json:"stream_type"` // main / sub — 一期预留，暂不生效，录像始终用主码流
 	StartTime  string `json:"start_time"`  // "08:00"
 	EndTime    string `json:"end_time"`    // "20:00"
 }
 
-type updateScheduleRequest struct {
+// UpdateScheduleRequest is the DTO for updating a recording schedule.
+type UpdateScheduleRequest struct {
 	CameraID   string `json:"camera_id" binding:"required"`
 	Name       string `json:"name"`
 	Enabled    bool   `json:"enabled"`
 	Weekdays   string `json:"weekdays"`
-	StreamType string `json:"stream_type"`
+	StreamType string `json:"stream_type"` // main / sub — 一期预留，暂不生效
 	StartTime  string `json:"start_time"`
 	EndTime    string `json:"end_time"`
 }
 
-func (r *createScheduleRequest) toRecordSchedule() model.RecordSchedule {
+func (r *CreateScheduleRequest) toRecordSchedule() model.RecordSchedule {
 	return model.RecordSchedule{
 		CameraID:   r.CameraID,
 		Name:       r.Name,
@@ -49,7 +51,7 @@ func (r *createScheduleRequest) toRecordSchedule() model.RecordSchedule {
 	}
 }
 
-func (r *updateScheduleRequest) toRecordSchedule() model.RecordSchedule {
+func (r *UpdateScheduleRequest) toRecordSchedule() model.RecordSchedule {
 	return model.RecordSchedule{
 		CameraID:   r.CameraID,
 		Name:       r.Name,
@@ -97,7 +99,7 @@ func (h *Handler) List(c *gin.Context) {
 // @Tags 录像计划
 // @Accept json
 // @Produce json
-// @Param request body model.RecordSchedule true "录像计划参数"
+// @Param request body CreateScheduleRequest true "录像计划参数"
 // @Success 200 {object} utils.Response{data=model.RecordSchedule}
 // @Failure 400 {object} utils.Response
 // @Failure 500 {object} utils.Response
@@ -105,7 +107,7 @@ func (h *Handler) List(c *gin.Context) {
 // @Security UserHeader
 // @Router /schedules [post]
 func (h *Handler) Create(c *gin.Context) {
-	var req createScheduleRequest
+	var req CreateScheduleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.Error(c, http.StatusBadRequest, "invalid request body")
 		return
@@ -128,7 +130,7 @@ func (h *Handler) Create(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Param id path string true "计划 ID"
-// @Param request body model.RecordSchedule true "录像计划参数"
+// @Param request body UpdateScheduleRequest true "录像计划参数"
 // @Success 200 {object} utils.Response
 // @Failure 400 {object} utils.Response
 // @Failure 404 {object} utils.Response
@@ -136,7 +138,7 @@ func (h *Handler) Create(c *gin.Context) {
 // @Security UserHeader
 // @Router /schedules/{id} [put]
 func (h *Handler) Update(c *gin.Context) {
-	var req updateScheduleRequest
+	var req UpdateScheduleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.Error(c, http.StatusBadRequest, "invalid request body")
 		return

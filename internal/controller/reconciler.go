@@ -12,6 +12,7 @@ import (
 	"aiovms/internal/mediamtx"
 	"aiovms/internal/model"
 	"aiovms/pkg/logger"
+	"aiovms/pkg/metrics"
 )
 
 // ---------------------------------------------------------------------------
@@ -115,14 +116,18 @@ func (r *Reconciler) Stop() {
 
 // reconcile runs all sub-reconcilers. Each is independent and idempotent.
 func (r *Reconciler) reconcile() {
+	metrics.ReconcileCycleTotal.Inc()
+
 	// 1. Check MediaMTX health
 	if err := r.mtx.HealthCheck(); err != nil {
+		metrics.MediaMTXUp.Set(0)
 		if !r.mtxDown {
 			logger.Warnf("reconciler: mediamtx is down: %v", err)
 			r.mtxDown = true
 		}
 		return
 	}
+	metrics.MediaMTXUp.Set(1)
 	if r.mtxDown {
 		logger.Info("reconciler: mediamtx recovered, running full reconcile")
 		r.mtxDown = false
@@ -141,11 +146,48 @@ func (r *Reconciler) reconcile() {
 	// 4. Ensure recording state matches desired state
 	r.reconcileRecording(mtxConfigs)
 
-	// 5. Probe camera status every 3rd tick (30s)
+	// 5. Update metrics for camera status counts
+	r.updateCameraMetrics()
+
+	// 6. Update metrics for active recording sessions
+	r.updateRecordingMetrics()
+
+	// 7. Probe camera status every 3rd tick (30s)
 	r.probeCounter++
 	if r.probeCounter >= statusProbeEvery {
 		r.reconcileCameraStatus()
 		r.probeCounter = 0
+	}
+}
+
+// updateCameraMetrics refreshes camera count gauges by status.
+func (r *Reconciler) updateCameraMetrics() {
+	cams, err := r.camRepo.FindAll()
+	if err != nil {
+		return
+	}
+	counts := make(map[string]int)
+	for _, cam := range cams {
+		counts[cam.Status]++
+	}
+	// Reset all known statuses then set current values
+	for _, s := range []string{"online", "offline", "connecting", "disconnected", "error"} {
+		metrics.CameraStatus.WithLabelValues(s).Set(float64(counts[s]))
+	}
+}
+
+// updateRecordingMetrics refreshes active recording session gauges.
+func (r *Reconciler) updateRecordingMetrics() {
+	sessions, err := r.recRepo.FindActiveSessions()
+	if err != nil {
+		return
+	}
+	counts := make(map[string]int)
+	for _, sess := range sessions {
+		counts[sess.TriggerType]++
+	}
+	for _, t := range []string{"manual", "schedule"} {
+		metrics.RecordingActiveSessions.WithLabelValues(t).Set(float64(counts[t]))
 	}
 }
 
@@ -228,6 +270,10 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 //  1. Process schedule transitions (start/stop) and manage RecordingSessions
 //  2. Compute desired recording state per camera (schedule OR manual session)
 //  3. Compare with actual MediaMTX record config and apply diff
+//
+// 注意：schedule.StreamType（main/sub）为一期预留字段，暂不生效。
+// 当前录像始终使用主码流（cam.MediaMTXPath → stream_url），二期实现子码流录制时
+// 需注册 cam-{id}-sub 路径并按 stream_type 选择 PatchPath 目标。
 func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfigItem) {
 	now := time.Now()
 	weekday := int(now.Weekday())

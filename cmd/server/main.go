@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
@@ -27,6 +28,7 @@ import (
 	"aiovms/internal/schedule"
 	"aiovms/pkg/crypto"
 	"aiovms/pkg/database"
+	_ "aiovms/pkg/metrics" // register prometheus metrics
 	"aiovms/pkg/logger"
 )
 
@@ -125,7 +127,7 @@ func main() {
 	wg.Add(1)
 	go func() { defer wg.Done(); reconciler.Run() }()
 
-	recScanner := recording.NewScanner(recSvc, cfg.Recording.Path)
+	recScanner := recording.NewScanner(recSvc, cfg.Recording.Path, camRepo)
 	wg.Add(1)
 	go func() { defer wg.Done(); recScanner.Run() }()
 
@@ -181,6 +183,9 @@ func main() {
 
 	// Swagger API documentation
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// Prometheus metrics（公开端点，无需租户头）
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	api := router.Group("/")
 	api.Use(middleware.TenantHeaderMiddleware())
