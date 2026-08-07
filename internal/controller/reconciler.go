@@ -72,6 +72,9 @@ type Reconciler struct {
 	recRepo RecordingRepo
 	mtx     MediaMTXClient
 
+	recordPath     string
+	segmentDuration string
+
 	mtxDown      bool
 	probeCounter int
 	stopCh       chan struct{}
@@ -83,13 +86,16 @@ func NewReconciler(
 	schRepo ScheduleRepo,
 	recRepo RecordingRepo,
 	mtx MediaMTXClient,
+	recordPath, segmentDuration string,
 ) *Reconciler {
 	return &Reconciler{
-		camRepo: camRepo,
-		schRepo: schRepo,
-		recRepo: recRepo,
-		mtx:     mtx,
-		stopCh:  make(chan struct{}),
+		camRepo:         camRepo,
+		schRepo:         schRepo,
+		recRepo:         recRepo,
+		mtx:             mtx,
+		recordPath:      recordPath,
+		segmentDuration: segmentDuration,
+		stopCh:          make(chan struct{}),
 	}
 }
 
@@ -220,9 +226,13 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 
 		existing, exists := mtxConfigs[cam.MediaMTXPath]
 		if exists {
-			// Check for source drift
-			if existing.Source == cam.StreamURL && existing.SourceOnDemand {
-				continue // config matches, nothing to do
+			// Only compare source for drift detection.
+			// sourceOnDemand is intentionally EXCLUDED: it is dynamically managed
+			// by the recording logic (false while recording, true otherwise).
+			// Including it here caused reconcileStreams to fight with reconcileRecording,
+			// deleting the path every 10s and breaking recording into ~20s fragments.
+			if existing.Source == cam.StreamURL {
+				continue // source matches, nothing to do
 			}
 			// Source changed — delete and re-add
 			logger.Warnf("reconcile streams: drift detected for %s (source %q -> %q)",
@@ -234,8 +244,10 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 		}
 
 		if err := r.mtx.AddPath(cam.MediaMTXPath, mediamtx.PathConfig{
-			Source:         cam.StreamURL,
-			SourceOnDemand: true,
+			Source:                cam.StreamURL,
+			SourceOnDemand:        true,
+			RecordPath:            r.recordPath + "/%path/%Y-%m-%d_%H-%M-%S",
+			RecordSegmentDuration: r.segmentDuration,
 		}); err != nil {
 			logger.Warnf("reconcile streams: add path %s for camera %s: %v", cam.MediaMTXPath, cam.ID, err)
 		} else {
@@ -312,8 +324,11 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 
 		switch {
 		case inWindow && sch.LastAction != "start":
-			// Start recording
-			if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true}); err != nil {
+			// Start recording (also disable sourceOnDemand so MediaMTX pulls stream actively)
+			if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
+				"record":         true,
+				"sourceOnDemand": false,
+			}); err != nil {
 				logger.Errorf("reconcile recording: start schedule %s: %v", sch.ID, err)
 				continue
 			}
@@ -346,7 +361,10 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 				}
 			}
 			if !manualActive {
-				_ = r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": false})
+				_ = r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
+					"record":         false,
+					"sourceOnDemand": true,
+				})
 			}
 			if sess, err := r.recRepo.FindActiveSessionBySchedule(sch.ID); err == nil && sess != nil {
 				_ = r.recRepo.CloseSession(sess.ID, now)
@@ -382,7 +400,10 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 
 		if !actualRecording {
 			// Active session exists but MediaMTX not recording — re-apply
-			if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true}); err != nil {
+			if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
+				"record":         true,
+				"sourceOnDemand": false,
+			}); err != nil {
 				logger.Errorf("reconcile recording: recover session %s camera %s: %v", sess.ID, sess.CameraID, err)
 				continue
 			}

@@ -53,9 +53,10 @@ type MediaMTXConfig struct {
 }
 
 type RecordingConfig struct {
-	Path          string `mapstructure:"path"`
-	RetentionDays int    `mapstructure:"retention_days"`
-	DiskWatermark int    `mapstructure:"disk_watermark"` // percentage, e.g. 90
+	Path            string `mapstructure:"path"`
+	RetentionDays   int    `mapstructure:"retention_days"`
+	DiskWatermark   int    `mapstructure:"disk_watermark"`     // percentage, e.g. 90
+	SegmentDuration string `mapstructure:"segment_duration"`   // MediaMTX recordSegmentDuration, e.g. "1m"
 }
 
 func Load(configPath string) (*Config, error) {
@@ -77,6 +78,7 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("database.log_level", "info")
 	v.SetDefault("recording.retention_days", 7)
 	v.SetDefault("recording.disk_watermark", 90)
+	v.SetDefault("recording.segment_duration", "1m")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config: %w", err)

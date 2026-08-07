@@ -109,7 +109,7 @@ func main() {
 
 	// 8. Bootstrap layers
 	camRepo := camera.NewRepository(db)
-	cameraSvc := camera.NewService(camRepo, mtxClient)
+	cameraSvc := camera.NewService(camRepo, mtxClient, cfg.Recording.Path, cfg.Recording.SegmentDuration)
 
 	recRepo := recording.NewRepository(db)
 	recSvc := recording.NewService(recRepo, cameraSvc, mtxClient)
@@ -119,7 +119,8 @@ func main() {
 
 	// 9. Start unified reconciler (replaces startup sync, cron triggerJob,
 	//    event-driven MTX recovery, and camera status checker).
-	reconciler := controller.NewReconciler(camRepo, schRepo, recRepo, mtxClient)
+	reconciler := controller.NewReconciler(camRepo, schRepo, recRepo, mtxClient,
+		cfg.Recording.Path, cfg.Recording.SegmentDuration)
 
 	// 10. Start background workers
 	var wg sync.WaitGroup

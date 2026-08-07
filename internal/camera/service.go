@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +29,8 @@ type Service interface {
 	GetStreamURLs(ctx context.Context, id string) (*StreamURLs, error)
 	UpdateStatus(ctx context.Context, id string, status string) error
 	Discover(ctx context.Context, timeoutSec int) ([]onvif.DiscoveredDevice, error)
+	ProbeONVIF(ctx context.Context, ip string, port int, username, password string) (*onvif.DiscoveredDevice, error)
+	ScanONVIF(ctx context.Context, cidr string, port int, username, password string, timeoutSec int) ([]onvif.DiscoveredDevice, error)
 	Snapshot(ctx context.Context, id string) (*SnapshotResult, error)
 	ListStatuses(ctx context.Context) ([]CameraStatus, error)
 	DeleteAll(ctx context.Context, tenantID int64) (int64, error)
@@ -53,12 +56,26 @@ type mediaMTXClient interface {
 }
 
 type service struct {
-	repo Repository
-	mtx  mediaMTXClient
+	repo           Repository
+	mtx            mediaMTXClient
+	recordPath     string
+	segmentDuration string
 }
 
-func NewService(repo Repository, mtx *mediamtx.Client) Service {
-	return &service{repo: repo, mtx: mtx}
+func NewService(repo Repository, mtx *mediamtx.Client, recordPath, segmentDuration string) Service {
+	return &service{repo: repo, mtx: mtx, recordPath: recordPath, segmentDuration: segmentDuration}
+}
+
+// buildPathConfig constructs the self-contained PathConfig for a camera.
+// 显式下发 recordPath 和 recordSegmentDuration，避免依赖 mediamtx.yml 的 all_others 继承
+// （显式 add 的命名路径不会继承 all_others，会用 setDefaults 硬编码默认值）。
+func (s *service) buildPathConfig(cam *model.Camera) mediamtx.PathConfig {
+	return mediamtx.PathConfig{
+		Source:                cam.StreamURL,
+		SourceOnDemand:        true,
+		RecordPath:            s.recordPath + "/%path/%Y-%m-%d_%H-%M-%S",
+		RecordSegmentDuration: s.segmentDuration,
+	}
 }
 
 
@@ -123,10 +140,7 @@ func (s *service) Create(ctx context.Context, cam *model.Camera) error {
 	}
 
 	// 一期仅注册主码流（stream_url）到 MediaMTX；sub_stream_url 暂未注册，二期实现子码流预览/录制时启用。
-	if err := s.mtx.AddPath(cam.MediaMTXPath, mediamtx.PathConfig{
-		Source:         cam.StreamURL,
-		SourceOnDemand: true,
-	}); err != nil {
+	if err := s.mtx.AddPath(cam.MediaMTXPath, s.buildPathConfig(cam)); err != nil {
 		logger.Errorf("mediamtx register failed for camera %s: %v", cam.ID, err)
 		_ = s.repo.UpdateStatus(cam.ID, "error")
 		return apperror.Wrap(err, 50301, 503, "failed to register camera to mediamtx")
@@ -192,10 +206,7 @@ func (s *service) Update(ctx context.Context, id string, cam *model.Camera) erro
 	}
 
 	// 重新注册主码流（一期不注册子码流）
-	if err := s.mtx.AddPath(existing.MediaMTXPath, mediamtx.PathConfig{
-		Source:         existing.StreamURL,
-		SourceOnDemand: true,
-	}); err != nil {
+	if err := s.mtx.AddPath(existing.MediaMTXPath, s.buildPathConfig(existing)); err != nil {
 		logger.Errorf("mediamtx re-register failed for camera %s: %v", id, err)
 		return apperror.Wrap(err, 50301, 503, "failed to re-register camera to mediamtx")
 	}
@@ -233,10 +244,7 @@ func (s *service) Connect(ctx context.Context, id string) error {
 	if err != nil {
 		return apperror.ErrCameraNotFound
 	}
-	if err := s.mtx.AddPath(cam.MediaMTXPath, mediamtx.PathConfig{
-		Source:         cam.StreamURL,
-		SourceOnDemand: true,
-	}); err != nil {
+	if err := s.mtx.AddPath(cam.MediaMTXPath, s.buildPathConfig(cam)); err != nil {
 		return err
 	}
 	// Mark as connecting; StatusChecker will probe to online/offline.
@@ -276,6 +284,156 @@ func (s *service) Discover(ctx context.Context, timeoutSec int) ([]onvif.Discove
 		timeoutSec = 5
 	}
 	return onvif.NewDiscoveryService().Discover(ctx, timeoutSec)
+}
+
+// ProbeONVIF directly connects to a camera via ONVIF unicast (no multicast),
+// retrieves device info and stream URLs. Suitable for Docker deployments
+// where WS-Discovery multicast does not cross the bridge network boundary.
+func (s *service) ProbeONVIF(ctx context.Context, ip string, port int, username, password string) (*onvif.DiscoveredDevice, error) {
+	svc := onvif.NewDiscoveryService()
+	addr := fmt.Sprintf("%s:%d", ip, port)
+
+	info, err := svc.GetDeviceInfo(ctx, addr, username, password)
+	if err != nil {
+		return nil, apperror.ErrInvalidInput.WithMessage("failed to connect ONVIF device: " + err.Error())
+	}
+
+	// GetStreamURL returns the first profile's RTSP URI;
+	// tryGetStreamURLs in discovery gets all profiles.
+	streamURL, err := svc.GetStreamURL(ctx, addr, username, password)
+	if err != nil {
+		logger.Warnf("ProbeONVIF: get stream url failed: %v", err)
+	}
+
+	dev := &onvif.DiscoveredDevice{
+		IP:           ip,
+		Port:         port,
+		Manufacturer: info.Manufacturer,
+		Model:        info.Model,
+		Firmware:     info.Firmware,
+		SerialNumber: info.SerialNumber,
+	}
+	if streamURL != "" {
+		dev.StreamURLs = []string{streamURL}
+	}
+	return dev, nil
+}
+
+// ScanONVIF scans an entire CIDR network range by unicast-probing each IP.
+// Suitable for Docker deployments where WS-Discovery multicast is unavailable.
+// Uses a worker pool (max 50 concurrent) to scan in parallel.
+func (s *service) ScanONVIF(ctx context.Context, cidr string, port int, username, password string, timeoutSec int) ([]onvif.DiscoveredDevice, error) {
+	ips, err := parseCIDR(cidr)
+	if err != nil {
+		return nil, apperror.ErrInvalidInput.WithMessage("invalid cidr: " + err.Error())
+	}
+	if port == 0 {
+		port = 80
+	}
+	if timeoutSec <= 0 {
+		timeoutSec = 10
+	}
+
+	type result struct {
+		dev *onvif.DiscoveredDevice
+		err error
+		ip  string
+	}
+
+	var wg sync.WaitGroup
+	workers := 50
+	if len(ips) < workers {
+		workers = len(ips)
+	}
+	ipCh := make(chan string, len(ips))
+	resultCh := make(chan result, len(ips))
+
+	// Producer
+	for _, ip := range ips {
+		ipCh <- ip
+	}
+	close(ipCh)
+
+	// Consumers
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			svc := onvif.NewDiscoveryService()
+			for ip := range ipCh {
+				if ctx.Err() != nil {
+					return
+				}
+				probeCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+				dev, err := s.probeOne(probeCtx, svc, ip, port, username, password)
+				cancel()
+				if err == nil && dev != nil {
+					resultCh <- result{dev: dev, ip: ip}
+				} else {
+					resultCh <- result{err: err, ip: ip}
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(resultCh)
+
+	var devices []onvif.DiscoveredDevice
+	for r := range resultCh {
+		if r.dev != nil {
+			devices = append(devices, *r.dev)
+		}
+	}
+	return devices, nil
+}
+
+// probeOne probes a single IP via ONVIF unicast.
+func (s *service) probeOne(ctx context.Context, svc onvif.DiscoveryService, ip string, port int, username, password string) (*onvif.DiscoveredDevice, error) {
+	addr := fmt.Sprintf("%s:%d", ip, port)
+	info, err := svc.GetDeviceInfo(ctx, addr, username, password)
+	if err != nil {
+		return nil, err
+	}
+	streamURL, _ := svc.GetStreamURL(ctx, addr, username, password)
+	dev := &onvif.DiscoveredDevice{
+		IP:           ip,
+		Port:         port,
+		Manufacturer: info.Manufacturer,
+		Model:        info.Model,
+		Firmware:     info.Firmware,
+		SerialNumber: info.SerialNumber,
+	}
+	if streamURL != "" {
+		dev.StreamURLs = []string{streamURL}
+	}
+	return dev, nil
+}
+
+// parseCIDR parses a CIDR string (e.g. "172.16.2.0/24") and returns all host IPs.
+func parseCIDR(cidr string) ([]string, error) {
+	ip, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return nil, err
+	}
+	var ips []string
+	for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); incIP(ip) {
+		ips = append(ips, ip.String())
+	}
+	// Remove network and broadcast addresses for /24 and smaller
+	if len(ips) > 2 {
+		ips = ips[1 : len(ips)-1]
+	}
+	return ips, nil
+}
+
+func incIP(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
 }
 
 func (s *service) Snapshot(ctx context.Context, id string) (*SnapshotResult, error) {

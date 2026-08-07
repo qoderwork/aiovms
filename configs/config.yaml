@@ -17,8 +17,10 @@ mediamtx:
 
 recording:
   path: "/recordings"
-  retention_days: 7
-  disk_watermark: 90
+  retention_days: 3
+  disk_watermark: 80
+  # MediaMTX 录像分片时长，显式下发给 cam-* 路径（不依赖 all_others 继承）
+  segment_duration: "1m"
 
 logger:
   filename: "logs/aiovms.log"

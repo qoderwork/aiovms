@@ -12,6 +12,8 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler) {
 		cameras.DELETE("", h.DeleteAll)
 		cameras.POST("/batch", h.BatchCreate)
 		cameras.POST("/discover", h.Discover)
+		cameras.POST("/probe", h.ProbeONVIF)
+		cameras.POST("/scan", h.ScanONVIF)
 		cameras.GET("/status", h.Status)
 		cameras.GET("/:id", h.Get)
 		cameras.PUT("/:id", h.Update)

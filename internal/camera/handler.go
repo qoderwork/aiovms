@@ -391,6 +391,78 @@ func (h *Handler) Discover(c *gin.Context) {
 	utils.Success(c, devices)
 }
 
+// ProbeONVIF godoc
+// @Summary ONVIF 单播探测
+// @Description 直接连接指定 IP 的 ONVIF 设备获取信息和 RTSP 流地址（绕过组播，适用于 Docker 环境）
+// @Tags 摄像头管理
+// @Accept json
+// @Produce json
+// @Param request body object true "探测请求"
+// @Success 200 {object} utils.Response{data=onvif.DiscoveredDevice}
+// @Failure 400 {object} utils.Response
+// @Security TenantHeader
+// @Security UserHeader
+// @Router /cameras/probe [post]
+func (h *Handler) ProbeONVIF(c *gin.Context) {
+	var req struct {
+		IP       string `json:"ip" binding:"required"`
+		Port     int    `json:"port"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, http.StatusBadRequest, "ip is required")
+		return
+	}
+	if req.Port == 0 {
+		req.Port = 80
+	}
+	dev, err := h.svc.ProbeONVIF(c.Request.Context(), req.IP, req.Port, req.Username, req.Password)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	utils.Success(c, dev)
+}
+
+// ScanONVIF godoc
+// @Summary ONVIF 网段扫描
+// @Description 扫描指定 CIDR 网段内所有 ONVIF 设备（单播并发探测，适用于 Docker 环境）
+// @Tags 摄像头管理
+// @Accept json
+// @Produce json
+// @Param request body object true "扫描请求"
+// @Success 200 {object} utils.Response{data=[]onvif.DiscoveredDevice}
+// @Failure 400 {object} utils.Response
+// @Security TenantHeader
+// @Security UserHeader
+// @Router /cameras/scan [post]
+func (h *Handler) ScanONVIF(c *gin.Context) {
+	var req struct {
+		CIDR      string `json:"cidr" binding:"required"`
+		Port      int    `json:"port"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
+		TimeoutSec int   `json:"timeout_sec"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, http.StatusBadRequest, "cidr is required (e.g. 172.16.2.0/24)")
+		return
+	}
+	if req.Port == 0 {
+		req.Port = 80
+	}
+	devices, err := h.svc.ScanONVIF(c.Request.Context(), req.CIDR, req.Port, req.Username, req.Password, req.TimeoutSec)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	if devices == nil {
+		devices = []onvif.DiscoveredDevice{}
+	}
+	utils.Success(c, devices)
+}
+
 // Snapshot godoc
 // @Summary 抓拍快照
 // @Description 触发设备抓拍并返回快照信息

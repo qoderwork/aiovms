@@ -321,6 +321,129 @@
                 }
             }
         },
+        "/cameras/probe": {
+            "post": {
+                "security": [
+                    {
+                        "TenantHeader": []
+                    },
+                    {
+                        "UserHeader": []
+                    }
+                ],
+                "description": "直接连接指定 IP 的 ONVIF 设备获取信息和 RTSP 流地址（绕过组播，适用于 Docker 环境）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "摄像头管理"
+                ],
+                "summary": "ONVIF 单播探测",
+                "parameters": [
+                    {
+                        "description": "探测请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/utils.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/onvif.DiscoveredDevice"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/utils.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/cameras/scan": {
+            "post": {
+                "security": [
+                    {
+                        "TenantHeader": []
+                    },
+                    {
+                        "UserHeader": []
+                    }
+                ],
+                "description": "扫描指定 CIDR 网段内所有 ONVIF 设备（单播并发探测，适用于 Docker 环境）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "摄像头管理"
+                ],
+                "summary": "ONVIF 网段扫描",
+                "parameters": [
+                    {
+                        "description": "扫描请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/utils.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/onvif.DiscoveredDevice"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/utils.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/cameras/status": {
             "get": {
                 "security": [

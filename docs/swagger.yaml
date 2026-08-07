@@ -783,6 +783,76 @@ paths:
       summary: ONVIF 设备发现
       tags:
       - 摄像头管理
+  /cameras/probe:
+    post:
+      consumes:
+      - application/json
+      description: 直接连接指定 IP 的 ONVIF 设备获取信息和 RTSP 流地址（绕过组播，适用于 Docker 环境）
+      parameters:
+      - description: 探测请求
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/utils.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/onvif.DiscoveredDevice'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: ONVIF 单播探测
+      tags:
+      - 摄像头管理
+  /cameras/scan:
+    post:
+      consumes:
+      - application/json
+      description: 扫描指定 CIDR 网段内所有 ONVIF 设备（单播并发探测，适用于 Docker 环境）
+      parameters:
+      - description: 扫描请求
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/utils.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/onvif.DiscoveredDevice'
+                  type: array
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: ONVIF 网段扫描
+      tags:
+      - 摄像头管理
   /cameras/status:
     get:
       description: 返回所有摄像头的轻量级状态，供 NMS 订阅

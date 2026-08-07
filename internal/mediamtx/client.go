@@ -173,10 +173,14 @@ func (c *Client) do(req *http.Request) error {
 }
 
 // PathConfig is the payload for AddPath.
+// 显式下发完整录像配置，不依赖 mediamtx.yml 的 all_others 继承
+// （显式 add 的命名路径不会继承 all_others，只会用 setDefaults 硬编码默认值）。
 type PathConfig struct {
-	Source         string `json:"source"`
-	SourceOnDemand bool   `json:"sourceOnDemand"`
-	Record         bool   `json:"record,omitempty"`
+	Source                string `json:"source"`
+	SourceOnDemand        bool   `json:"sourceOnDemand"`
+	Record                bool   `json:"record,omitempty"`
+	RecordPath            string `json:"recordPath,omitempty"`
+	RecordSegmentDuration string `json:"recordSegmentDuration,omitempty"`
 }
 
 // PathConfigItem is returned by ListPathConfigs. It includes the record

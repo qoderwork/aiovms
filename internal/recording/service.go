@@ -97,7 +97,11 @@ func (s *service) StartManual(ctx context.Context, cameraID string) error {
 
 	// 1. Patch MediaMTX first: if it fails, we don't create a dangling session.
 //    注意：一期录像始终使用主码流（cam.MediaMTXPath），stream_type 暂不生效。
-	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": true}); err != nil {
+//    同时关闭 sourceOnDemand，确保 MediaMTX 主动拉流录像，不依赖有人预览。
+	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
+		"record":          true,
+		"sourceOnDemand":  false,
+	}); err != nil {
 		return err
 	}
 
@@ -128,7 +132,11 @@ func (s *service) StopManual(ctx context.Context, cameraID string) error {
 	}
 
 	// 1. Stop MediaMTX recording first (idempotent: safe even if not recording).
-	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{"record": false}); err != nil {
+	//    恢复 sourceOnDemand=true，无人预览时停止拉流节省资源。
+	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
+		"record":         false,
+		"sourceOnDemand": true,
+	}); err != nil {
 		return err
 	}
 
