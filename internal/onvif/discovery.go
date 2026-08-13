@@ -1,19 +1,16 @@
 // Package onvif provides ONVIF device discovery and stream URL extraction
-// using IOTechSystems/onvif library.
-
+// using github.com/0x524a/onvif-go (modern, actively-maintained ONVIF client).
 package onvif
 
 import (
 	"context"
-	"encoding/xml"
 	"fmt"
-	"io"
+	"net/url"
 	"strings"
 	"time"
 
-	onvif2 "github.com/IOTechSystems/onvif"
-	"github.com/IOTechSystems/onvif/media"
-	xsd "github.com/IOTechSystems/onvif/xsd/onvif"
+	onvifgo "github.com/0x524a/onvif-go"
+	"github.com/0x524a/onvif-go/discovery"
 
 	"aiovms/pkg/logger"
 )
@@ -41,153 +38,156 @@ type DeviceInfo struct {
 // DiscoveryService is the ONVIF device discovery interface.
 type DiscoveryService interface {
 	Discover(ctx context.Context, interfaceName string, timeoutSec int) ([]DiscoveredDevice, error)
-	GetStreamURL(ctx context.Context, deviceAddr, user, pass string) (string, error)
-	GetDeviceInfo(ctx context.Context, deviceAddr, user, pass string) (*DeviceInfo, error)
+	// ProbeDevice probes a single device by IP:port via ONVIF unicast (no
+	// multicast), returning device info and the primary RTSP stream URL.
+	ProbeDevice(ctx context.Context, ip string, port int, user, pass string) (*DiscoveredDevice, error)
 }
 
 type discoveryService struct{}
 
-// NewDiscoveryService creates an ONVIF discovery service backed by IOTechSystems/onvif.
+// NewDiscoveryService creates an ONVIF discovery service backed by onvif-go.
 func NewDiscoveryService() DiscoveryService {
 	return &discoveryService{}
 }
 
-// Discover performs WS-Discovery multicast Probe to find ONVIF devices.
-// interfaceName optionally binds the multicast socket to a specific NIC
-// (empty = auto-select). timeoutSec controls the maximum wait time for
-// device responses (default 5s).
+// Discover performs WS-Discovery multicast Probe to find ONVIF devices, then
+// enriches each with GetDeviceInformation (best-effort, no auth). interfaceName
+// optionally binds the multicast socket to a specific NIC (empty = auto).
+// timeoutSec is the multicast response window (default 5s).
 //
-// The multicast probe is self-implemented (see multicast.go) because the
-// upstream IOTechSystems/onvif library hardcodes a 1-second read deadline,
-// which is too short for real cameras and caused "same-subnet scan finds
-// nothing" on multi-NIC hosts.
+// The multicast probe is provided by onvif-go's discovery package, which has a
+// configurable read deadline — unlike the previously-used IOTechSystems/onvif
+// library whose 1-second hardcoded deadline caused "same-subnet scan finds
+// nothing" on real cameras.
 func (s *discoveryService) Discover(ctx context.Context, interfaceName string, timeoutSec int) ([]DiscoveredDevice, error) {
 	if timeoutSec <= 0 {
 		timeoutSec = 5
 	}
+	timeout := time.Duration(timeoutSec) * time.Second
 
-	type result struct {
-		devices []onvif2.Device
-		err     error
+	devices, err := discovery.DiscoverWithOptions(ctx, timeout, &discovery.DiscoverOptions{
+		NetworkInterface: interfaceName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("discovery probe: %w", err)
 	}
-	ch := make(chan result, 1)
-	go func() {
-		devices, err := multicastProbe(interfaceName, time.Duration(timeoutSec)*time.Second)
-		ch <- result{devices, err}
-	}()
-
-	var r result
-	select {
-	case r = <-ch:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-
-	if r.err != nil {
-		return nil, fmt.Errorf("discovery probe: %w", r.err)
-	}
-	onvifDevices := r.devices
-	if len(onvifDevices) == 0 {
+	if len(devices) == 0 {
 		return nil, nil
 	}
 
-	logger.Infof("ONVIF discovery: found %d devices", len(onvifDevices))
+	logger.Infof("ONVIF discovery: found %d devices", len(devices))
 
-	var devices []DiscoveredDevice
-	for _, d := range onvifDevices {
-		select {
-		case <-ctx.Done():
-			return devices, ctx.Err()
-		default:
-		}
-
-		info := d.GetDeviceInfo()
-
-		// Filter out non-camera WS-Discovery responders (Synology NAS,
-		// printers, scanners, Windows machines) that answer any Probe
-		// regardless of type filter. Adapted from MiBeeNvr (#266 fix).
-		if !isONVIFCamera(info.Manufacturer, info.Model) {
-			logger.Debugf("ONVIF discovery: skipping non-camera device manufacturer=%q model=%q",
-				info.Manufacturer, info.Model)
+	result := make([]DiscoveredDevice, 0, len(devices))
+	for _, d := range devices {
+		// Filter non-camera WS-Discovery responders (Synology NAS, printers,
+		// Windows machines) using the ONVIF Types/Scopes signals.
+		if !isONVIFCamera(d) {
+			logger.Debugf("ONVIF discovery: skipping non-camera device endpoint=%q types=%v",
+				d.GetDeviceEndpoint(), d.Types)
 			continue
 		}
 
-		params := d.GetDeviceParams()
+		endpoint := d.GetDeviceEndpoint()
+		ip, port := parseEndpoint(endpoint)
 
 		dev := DiscoveredDevice{
-			IP:           parseIP(params.Xaddr),
-			Port:         parsePort(params.Xaddr),
-			Name:         info.Name,
-			Manufacturer: info.Manufacturer,
-			Model:        info.Model,
-			Firmware:     info.FirmwareVersion,
-			SerialNumber: info.SerialNumber,
+			IP:   ip,
+			Port: port,
+			Name: d.GetName(),
 		}
 
-		if urls, err := s.tryGetStreamURLs(&d, params.Username, params.Password); err == nil {
-			dev.StreamURLs = urls
+		// Enrich with device information (no auth, best-effort). GetDeviceInformation
+		// is unauthenticated on most cameras.
+		if info, err := s.getDeviceInfo(ctx, endpoint, "", ""); err == nil {
+			dev.Manufacturer = info.Manufacturer
+			dev.Model = info.Model
+			dev.Firmware = info.Firmware
+			dev.SerialNumber = info.SerialNumber
 		}
 
-		devices = append(devices, dev)
+		result = append(result, dev)
 	}
-	return devices, nil
+	return result, nil
 }
 
-// GetStreamURL connects to an ONVIF device and extracts the first RTSP stream URL.
-func (s *discoveryService) GetStreamURL(ctx context.Context, deviceAddr, user, pass string) (string, error) {
-	dev, err := onvif2.NewDevice(onvif2.DeviceParams{
-		Xaddr: deviceAddr, Username: user, Password: pass,
-	})
+// ProbeDevice probes a single device at ip:port via ONVIF unicast, returning
+// device info and the primary RTSP stream URL. Suitable for Docker deployments
+// where WS-Discovery multicast does not cross the bridge network boundary.
+func (s *discoveryService) ProbeDevice(ctx context.Context, ip string, port int, user, pass string) (*DiscoveredDevice, error) {
+	if port <= 0 {
+		port = 80
+	}
+	addr := fmt.Sprintf("%s:%d", ip, port)
+
+	info, err := s.getDeviceInfo(ctx, addr, user, pass)
 	if err != nil {
-		return "", fmt.Errorf("connect device: %w", err)
+		return nil, err
 	}
 
-	resp, err := dev.CallMethod(media.GetProfiles{})
+	dev := &DiscoveredDevice{
+		IP:           ip,
+		Port:         port,
+		Manufacturer: info.Manufacturer,
+		Model:        info.Model,
+		Firmware:     info.Firmware,
+		SerialNumber: info.SerialNumber,
+	}
+
+	// Stream URL is best-effort: a device may have no media profiles or may
+	// reject the GetStreamUri call even though GetDeviceInformation succeeded.
+	if streamURL, err := s.getStreamURL(ctx, addr, user, pass); err == nil && streamURL != "" {
+		dev.StreamURLs = []string{streamURL}
+	}
+
+	return dev, nil
+}
+
+// getStreamURL connects to an ONVIF device and extracts the first profile's RTSP stream URL.
+// deviceAddr can be a full URL, "ip:port", or bare IP.
+func (s *discoveryService) getStreamURL(ctx context.Context, deviceAddr, user, pass string) (string, error) {
+	client, err := onvifgo.NewClient(deviceAddr,
+		onvifgo.WithCredentials(user, pass),
+		onvifgo.WithTimeout(5*time.Second),
+	)
+	if err != nil {
+		return "", fmt.Errorf("create onvif client: %w", err)
+	}
+
+	if err := client.Initialize(ctx); err != nil {
+		return "", fmt.Errorf("initialize onvif client: %w", err)
+	}
+
+	profiles, err := client.GetProfiles(ctx)
 	if err != nil {
 		return "", fmt.Errorf("get profiles: %w", err)
 	}
-	defer resp.Body.Close()
-
-	var profilesResp media.GetProfilesResponse
-	if err := decodeXMLResp(resp.Body, &profilesResp); err != nil {
-		return "", fmt.Errorf("decode profiles: %w", err)
-	}
-	if len(profilesResp.Profiles) == 0 {
+	if len(profiles) == 0 {
 		return "", fmt.Errorf("no media profiles found")
 	}
 
-	// Get stream URI from first profile
-	profile := profilesResp.Profiles[0]
-	proto := xsd.TransportProtocol("RTSP")
-	streamResp, err := dev.CallMethod(media.GetStreamUri{
-		StreamSetup: &xsd.StreamSetup{
-			Stream:    streamType("RTP-Unicast"),
-			Transport: &xsd.Transport{Protocol: &proto},
-		},
-		ProfileToken: &profile.Token,
-	})
+	uri, err := client.GetStreamURI(ctx, profiles[0].Token)
 	if err != nil {
 		return "", fmt.Errorf("get stream uri: %w", err)
 	}
-	defer streamResp.Body.Close()
-
-	var uriResp media.GetStreamUriResponse
-	if err := decodeXMLResp(streamResp.Body, &uriResp); err != nil {
-		return "", fmt.Errorf("decode stream uri: %w", err)
-	}
-
-	return string(uriResp.MediaUri.Uri), nil
+	return uri.URI, nil
 }
 
-// GetDeviceInfo connects to an ONVIF device and retrieves manufacturer/model/firmware.
-func (s *discoveryService) GetDeviceInfo(ctx context.Context, deviceAddr, user, pass string) (*DeviceInfo, error) {
-	dev, err := onvif2.NewDevice(onvif2.DeviceParams{
-		Xaddr: deviceAddr, Username: user, Password: pass,
-	})
+// getDeviceInfo connects to an ONVIF device and retrieves manufacturer/model/firmware.
+// GetDeviceInformation is typically unauthenticated on most cameras.
+func (s *discoveryService) getDeviceInfo(ctx context.Context, deviceAddr, user, pass string) (*DeviceInfo, error) {
+	client, err := onvifgo.NewClient(deviceAddr,
+		onvifgo.WithCredentials(user, pass),
+		onvifgo.WithTimeout(5*time.Second),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("connect device: %w", err)
+		return nil, fmt.Errorf("create onvif client: %w", err)
 	}
-	info := dev.GetDeviceInfo()
+
+	info, err := client.GetDeviceInformation(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get device information: %w", err)
+	}
+
 	return &DeviceInfo{
 		Manufacturer: info.Manufacturer,
 		Model:        info.Model,
@@ -196,118 +196,61 @@ func (s *discoveryService) GetDeviceInfo(ctx context.Context, deviceAddr, user, 
 	}, nil
 }
 
-func (s *discoveryService) tryGetStreamURLs(d *onvif2.Device, user, pass string) ([]string, error) {
-	params := d.GetDeviceParams()
-	dev, err := onvif2.NewDevice(onvif2.DeviceParams{
-		Xaddr: params.Xaddr, Username: user, Password: pass,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := dev.CallMethod(media.GetProfiles{})
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var profilesResp media.GetProfilesResponse
-	if err := decodeXMLResp(resp.Body, &profilesResp); err != nil {
-		return nil, err
-	}
-
-	var urls []string
-	proto := xsd.TransportProtocol("RTSP")
-	for _, p := range profilesResp.Profiles {
-		profile := p
-		uriResp, err := dev.CallMethod(media.GetStreamUri{
-			StreamSetup: &xsd.StreamSetup{
-				Stream:    streamType("RTP-Unicast"),
-				Transport: &xsd.Transport{Protocol: &proto},
-			},
-			ProfileToken: &profile.Token,
-		})
-		if err != nil {
-			continue
-		}
-		var uri media.GetStreamUriResponse
-		if err := decodeXMLResp(uriResp.Body, &uri); err != nil {
-			uriResp.Body.Close()
-			continue
-		}
-		uriResp.Body.Close()
-		if uri.MediaUri.Uri != "" {
-			urls = append(urls, string(uri.MediaUri.Uri))
-		}
-	}
-	return urls, nil
-}
-
-func decodeXMLResp(r io.Reader, v interface{}) error {
-	body, err := io.ReadAll(r)
-	if err != nil {
-		return fmt.Errorf("read body: %w", err)
-	}
-	if err := xml.Unmarshal(body, v); err != nil {
-		return fmt.Errorf("xml unmarshal: %w", err)
-	}
-	return nil
-}
-
-func streamType(s string) *xsd.StreamType {
-	t := xsd.StreamType(s)
-	return &t
-}
-
-func parseIP(addr string) string {
-	for i := len(addr) - 1; i >= 0; i-- {
-		if addr[i] == ':' {
-			return addr[:i]
-		}
-	}
-	return addr
-}
-
-// isONVIFCamera heuristically filters non-camera WS-Discovery responders.
-// Many NAS devices (Synology), printers, and Windows machines respond to
-// ANY WS-Discovery Probe regardless of the d:Types filter. They typically
-// advertise manufacturer/model strings that are clearly not cameras.
+// isONVIFCamera reports whether a WS-Discovery responder is an ONVIF network
+// video device, as opposed to a generic WS-Discovery responder (Synology NAS,
+// Windows machines, printers) that answers ANY Probe regardless of type filter.
 //
-// Filtering at the discovery boundary prevents empty-shell camera records
-// from being created for devices that can never stream video.
-// Adapted from MiBeeNvr (MIT License, issue #266).
-func isONVIFCamera(manufacturer, model string) bool {
-	m := strings.ToLower(manufacturer)
-	md := strings.ToLower(model)
-
-	// Known non-camera WS-Discovery responders.
-	nonCamera := []string{
-		"synology", "qnap", "western digital", "wd ", "seagate",
-		"hewlett-packard", "hp ", "canon", "epson", "brother",
-		"xerox", "ricoh", "lexmark", "samsung printer", "windows",
-		"microsoft", "netgear", "cisco", "ubiquiti", "aruba",
-		"raspberry pi",
-	}
-	for _, nc := range nonCamera {
-		if strings.Contains(m, nc) || strings.Contains(md, nc) {
-			return false
+// Per ONVIF Core Spec, a real camera advertises either:
+//   - Types containing "NetworkVideoTransmitter", or
+//   - a Scope beginning with "onvif://www.onvif.org/".
+//
+// The check is permissive (matches either signal) to avoid false-negative drops
+// of marginal ONVIF implementations.
+func isONVIFCamera(d *discovery.Device) bool {
+	for _, t := range d.Types {
+		if strings.Contains(t, "NetworkVideoTransmitter") {
+			return true
 		}
 	}
-	return true
+	for _, sc := range d.Scopes {
+		if strings.HasPrefix(sc, "onvif://www.onvif.org/") {
+			return true
+		}
+	}
+	return false
 }
 
-func parsePort(addr string) int {
-	for i := len(addr) - 1; i >= 0; i-- {
-		if addr[i] == ':' {
-			port := 0
-			for _, c := range addr[i+1:] {
-				if c < '0' || c > '9' {
-					return 80
-				}
-				port = port*10 + int(c-'0')
-			}
-			return port
+// parseEndpoint extracts host and port from a device endpoint URL.
+// Endpoint may be "http://192.168.1.100/onvif/device_service" or "192.168.1.100:8080".
+func parseEndpoint(endpoint string) (host string, port int) {
+	if endpoint == "" {
+		return "", 0
+	}
+	// Ensure it has a scheme for url.Parse to work uniformly.
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "http://" + endpoint
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "", 0
+	}
+	host = u.Hostname()
+	port = 80
+	if p := u.Port(); p != "" {
+		if n := parseIntSafe(p); n > 0 {
+			port = n
 		}
 	}
-	return 80
+	return host, port
+}
+
+func parseIntSafe(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }

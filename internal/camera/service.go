@@ -287,34 +287,12 @@ func (s *service) Discover(ctx context.Context, interfaceName string, timeoutSec
 }
 
 // ProbeONVIF directly connects to a camera via ONVIF unicast (no multicast),
-// retrieves device info and stream URLs. Suitable for Docker deployments
-// where WS-Discovery multicast does not cross the bridge network boundary.
+// retrieving device info and the primary stream URL. Suitable for Docker
+// deployments where WS-Discovery multicast does not cross the bridge network.
 func (s *service) ProbeONVIF(ctx context.Context, ip string, port int, username, password string) (*onvif.DiscoveredDevice, error) {
-	svc := onvif.NewDiscoveryService()
-	addr := fmt.Sprintf("%s:%d", ip, port)
-
-	info, err := svc.GetDeviceInfo(ctx, addr, username, password)
+	dev, err := onvif.NewDiscoveryService().ProbeDevice(ctx, ip, port, username, password)
 	if err != nil {
 		return nil, apperror.ErrInvalidInput.WithMessage("failed to connect ONVIF device: " + err.Error())
-	}
-
-	// GetStreamURL returns the first profile's RTSP URI;
-	// tryGetStreamURLs in discovery gets all profiles.
-	streamURL, err := svc.GetStreamURL(ctx, addr, username, password)
-	if err != nil {
-		logger.Warnf("ProbeONVIF: get stream url failed: %v", err)
-	}
-
-	dev := &onvif.DiscoveredDevice{
-		IP:           ip,
-		Port:         port,
-		Manufacturer: info.Manufacturer,
-		Model:        info.Model,
-		Firmware:     info.Firmware,
-		SerialNumber: info.SerialNumber,
-	}
-	if streamURL != "" {
-		dev.StreamURLs = []string{streamURL}
 	}
 	return dev, nil
 }
@@ -365,7 +343,7 @@ func (s *service) ScanONVIF(ctx context.Context, cidr string, port int, username
 					return
 				}
 				probeCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
-				dev, err := s.probeOne(probeCtx, svc, ip, port, username, password)
+				dev, err := svc.ProbeDevice(probeCtx, ip, port, username, password)
 				cancel()
 				if err == nil && dev != nil {
 					resultCh <- result{dev: dev, ip: ip}
@@ -386,28 +364,6 @@ func (s *service) ScanONVIF(ctx context.Context, cidr string, port int, username
 		}
 	}
 	return devices, nil
-}
-
-// probeOne probes a single IP via ONVIF unicast.
-func (s *service) probeOne(ctx context.Context, svc onvif.DiscoveryService, ip string, port int, username, password string) (*onvif.DiscoveredDevice, error) {
-	addr := fmt.Sprintf("%s:%d", ip, port)
-	info, err := svc.GetDeviceInfo(ctx, addr, username, password)
-	if err != nil {
-		return nil, err
-	}
-	streamURL, _ := svc.GetStreamURL(ctx, addr, username, password)
-	dev := &onvif.DiscoveredDevice{
-		IP:           ip,
-		Port:         port,
-		Manufacturer: info.Manufacturer,
-		Model:        info.Model,
-		Firmware:     info.Firmware,
-		SerialNumber: info.SerialNumber,
-	}
-	if streamURL != "" {
-		dev.StreamURLs = []string{streamURL}
-	}
-	return dev, nil
 }
 
 // parseCIDR parses a CIDR string (e.g. "172.16.2.0/24") and returns all host IPs.
