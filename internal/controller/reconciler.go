@@ -423,6 +423,7 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 				continue
 			}
 			restored++
+			metrics.DriftEvents.WithLabelValues("forward").Inc()
 			logger.Warnf("reconcile recording: recovered session %s camera %s (drift)", sess.ID, sess.CameraID)
 		}
 	}
@@ -476,6 +477,7 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 			continue
 		}
 		delete(r.orphanRecordTicks, cam.MediaMTXPath)
+		metrics.DriftEvents.WithLabelValues("reverse").Inc()
 		logger.Warnf("reconcile recording: stopped orphan recording on %s (no active session or schedule)", cam.MediaMTXPath)
 	}
 }

@@ -57,6 +57,19 @@ var (
 			Help: "Total recording files in database.",
 		},
 	)
+
+	// DriftEvents — 漂移修复事件计数（按方向分维）。
+	// forward: 存在活跃 session 但 MediaMTX 未在录制，重新开启录制（掉录恢复）；
+	// reverse: MediaMTX 在录制但无 session/计划支撑，强制停止（孤儿录像修复）。
+	// 该指标反映 DB 期望态与 MediaMTX 实际态的收敛频率，持续增长说明
+	// 存在系统性故障（如 MediaMTX 频繁重启或 API 调用持续失败）。
+	DriftEvents = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "vms_drift_events_total",
+			Help: "Drift repair events by direction (forward=re-enable lost recording, reverse=stop orphan recording).",
+		},
+		[]string{"direction"},
+	)
 )
 
 func init() {
@@ -67,5 +80,6 @@ func init() {
 		MediaMTXAPIDuration,
 		ReconcileCycleTotal,
 		RecordingsTotal,
+		DriftEvents,
 	)
 }

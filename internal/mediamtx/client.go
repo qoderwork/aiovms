@@ -3,6 +3,7 @@ package mediamtx
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,18 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// APIError is returned when MediaMTX responds with an HTTP error status.
+// Carries the status code so callers can distinguish deterministic client
+// errors (e.g. 400 path already exists) from other failures.
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("mediamtx error %d: %s", e.StatusCode, e.Body)
+}
+
 // NewClient creates a MediaMTX API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
@@ -29,8 +42,39 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-// AddPath registers a new RTSP source path in MediaMTX.
+// AddPath registers a new RTSP source path in MediaMTX with upsert semantics.
+// If the path already exists — typically a retry after a previous create
+// succeeded but its caller failed before recording that fact — it falls back
+// to patching the full desired config, so the call converges instead of
+// failing with 400. This is what makes Create/reconcile retries safe.
 func (c *Client) AddPath(name string, cfg PathConfig) error {
+	err := c.addPath(name, cfg)
+	if err == nil {
+		return nil
+	}
+
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		return err
+	}
+
+	// 400 — most likely "path already exists". Converge by patching the
+	// full desired config (patch is idempotent).
+	if perr := c.PatchPath(name, map[string]any{
+		"source":                cfg.Source,
+		"sourceOnDemand":        cfg.SourceOnDemand,
+		"record":                cfg.Record,
+		"recordPath":            cfg.RecordPath,
+		"recordSegmentDuration": cfg.RecordSegmentDuration,
+	}); perr != nil {
+		return fmt.Errorf("add path %s failed (%v) and patch fallback failed: %w", name, err, perr)
+	}
+	logger.Warnf("mediamtx path %s already exists, converged via patch fallback", name)
+	return nil
+}
+
+// addPath performs the raw path creation request.
+func (c *Client) addPath(name string, cfg PathConfig) error {
 	body, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal path config: %w", err)
@@ -198,7 +242,7 @@ func (c *Client) do(req *http.Request) error {
 			resp.Body.Close()
 			logger.Errorf("mediamtx %s %s -> %d: %s", req.Method, req.URL.Path, resp.StatusCode, string(body))
 			metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, status).Observe(time.Since(start).Seconds())
-			return fmt.Errorf("mediamtx error %d: %s", resp.StatusCode, string(body))
+			return &APIError{StatusCode: resp.StatusCode, Body: string(body)}
 		}
 		resp.Body.Close()
 		metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, "ok").Observe(time.Since(start).Seconds())
