@@ -28,7 +28,7 @@ type Service interface {
 	Disconnect(ctx context.Context, id string) error
 	GetStreamURLs(ctx context.Context, id string) (*StreamURLs, error)
 	UpdateStatus(ctx context.Context, id string, status string) error
-	Discover(ctx context.Context, timeoutSec int) ([]onvif.DiscoveredDevice, error)
+	Discover(ctx context.Context, interfaceName string, timeoutSec int) ([]onvif.DiscoveredDevice, error)
 	ProbeONVIF(ctx context.Context, ip string, port int, username, password string) (*onvif.DiscoveredDevice, error)
 	ScanONVIF(ctx context.Context, cidr string, port int, username, password string, timeoutSec int) ([]onvif.DiscoveredDevice, error)
 	Snapshot(ctx context.Context, id string) (*SnapshotResult, error)
@@ -279,11 +279,11 @@ func (s *service) UpdateStatus(ctx context.Context, id string, status string) er
 	return s.repo.UpdateStatus(id, status)
 }
 
-func (s *service) Discover(ctx context.Context, timeoutSec int) ([]onvif.DiscoveredDevice, error) {
+func (s *service) Discover(ctx context.Context, interfaceName string, timeoutSec int) ([]onvif.DiscoveredDevice, error) {
 	if timeoutSec <= 0 {
 		timeoutSec = 5
 	}
-	return onvif.NewDiscoveryService().Discover(ctx, timeoutSec)
+	return onvif.NewDiscoveryService().Discover(ctx, interfaceName, timeoutSec)
 }
 
 // ProbeONVIF directly connects to a camera via ONVIF unicast (no multicast),

@@ -16,8 +16,11 @@ type Repository interface {
 	FindByID(id string) (*model.Recording, error)
 	FindAll(tenantID int64, cameraID, startTime, endTime string, offset, limit int) ([]model.Recording, int64, error)
 	Delete(rec *model.Recording) error
+	DeleteByIDs(ids []string) error
 	FindByPath(filePath string) (*model.Recording, error)
 	FindOlderThan(cutoff time.Time) ([]model.Recording, error)
+	FindOlderThanByStatus(cutoff time.Time, status string) ([]model.Recording, error)
+	FindOldestComplete(limit int) ([]model.Recording, error)
 	FindAllSortedByTime() ([]model.Recording, error)
 
 	// Recording session operations.
@@ -82,6 +85,15 @@ func (r *repository) Delete(rec *model.Recording) error {
 	return r.db.Delete(rec).Error
 }
 
+// DeleteByIDs batch-deletes recordings by primary key IDs.
+// Uses a single DELETE ... WHERE id IN (...) query for efficiency.
+func (r *repository) DeleteByIDs(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.Where("id IN ?", ids).Delete(&model.Recording{}).Error
+}
+
 func (r *repository) FindByPath(filePath string) (*model.Recording, error) {
 	var rec model.Recording
 	err := r.db.Where("file_path = ?", filePath).First(&rec).Error
@@ -94,6 +106,24 @@ func (r *repository) FindByPath(filePath string) (*model.Recording, error) {
 func (r *repository) FindOlderThan(cutoff time.Time) ([]model.Recording, error) {
 	var recs []model.Recording
 	err := r.db.Where("start_time < ?", cutoff).Find(&recs).Error
+	return recs, err
+}
+
+// FindOlderThanByStatus fetches recordings older than cutoff with a specific status.
+// Filters to "complete" to avoid deleting still-writing segments.
+func (r *repository) FindOlderThanByStatus(cutoff time.Time, status string) ([]model.Recording, error) {
+	var recs []model.Recording
+	err := r.db.Where("start_time < ? AND status = ?", cutoff, status).
+		Order("start_time ASC").Find(&recs).Error
+	return recs, err
+}
+
+// FindOldestComplete returns the oldest completed recordings for disk-threshold cleanup.
+// Limits the result to avoid loading all recordings into memory at once.
+func (r *repository) FindOldestComplete(limit int) ([]model.Recording, error) {
+	var recs []model.Recording
+	err := r.db.Where("status = ?", "complete").
+		Order("start_time ASC").Limit(limit).Find(&recs).Error
 	return recs, err
 }
 

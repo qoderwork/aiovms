@@ -72,9 +72,19 @@ func (m *mockRepo) Delete(rec *model.Recording) error {
 	m.lastDeleted = rec
 	return nil
 }
+func (m *mockRepo) DeleteByIDs(ids []string) error {
+	for _, id := range ids {
+		delete(m.recs, id)
+	}
+	return nil
+}
 func (m *mockRepo) FindByPath(filePath string) (*model.Recording, error) { return nil, nil }
-func (m *mockRepo) FindOlderThan(cutoff time.Time) ([]model.Recording, error) { return nil, nil }
-func (m *mockRepo) FindAllSortedByTime() ([]model.Recording, error) { return nil, nil }
+func (m *mockRepo) FindOlderThan(cutoff time.Time) ([]model.Recording, error)  { return nil, nil }
+func (m *mockRepo) FindOlderThanByStatus(cutoff time.Time, status string) ([]model.Recording, error) {
+	return nil, nil
+}
+func (m *mockRepo) FindOldestComplete(limit int) ([]model.Recording, error)        { return nil, nil }
+func (m *mockRepo) FindAllSortedByTime() ([]model.Recording, error)               { return nil, nil }
 
 // --- session mock impl ---
 

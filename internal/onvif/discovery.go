@@ -8,12 +8,12 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	onvif2 "github.com/IOTechSystems/onvif"
 	"github.com/IOTechSystems/onvif/media"
 	xsd "github.com/IOTechSystems/onvif/xsd/onvif"
-	wsdiscovery "github.com/IOTechSystems/onvif/ws-discovery"
 
 	"aiovms/pkg/logger"
 )
@@ -40,7 +40,7 @@ type DeviceInfo struct {
 
 // DiscoveryService is the ONVIF device discovery interface.
 type DiscoveryService interface {
-	Discover(ctx context.Context, timeoutSec int) ([]DiscoveredDevice, error)
+	Discover(ctx context.Context, interfaceName string, timeoutSec int) ([]DiscoveredDevice, error)
 	GetStreamURL(ctx context.Context, deviceAddr, user, pass string) (string, error)
 	GetDeviceInfo(ctx context.Context, deviceAddr, user, pass string) (*DeviceInfo, error)
 }
@@ -53,10 +53,15 @@ func NewDiscoveryService() DiscoveryService {
 }
 
 // Discover performs WS-Discovery multicast Probe to find ONVIF devices.
-// timeoutSec controls the maximum wait time for device responses.
-// Note: the underlying ws-discovery library has a 1-second per-packet read
-// deadline; this timeout provides an upper bound for the entire discovery.
-func (s *discoveryService) Discover(ctx context.Context, timeoutSec int) ([]DiscoveredDevice, error) {
+// interfaceName optionally binds the multicast socket to a specific NIC
+// (empty = auto-select). timeoutSec controls the maximum wait time for
+// device responses (default 5s).
+//
+// The multicast probe is self-implemented (see multicast.go) because the
+// upstream IOTechSystems/onvif library hardcodes a 1-second read deadline,
+// which is too short for real cameras and caused "same-subnet scan finds
+// nothing" on multi-NIC hosts.
+func (s *discoveryService) Discover(ctx context.Context, interfaceName string, timeoutSec int) ([]DiscoveredDevice, error) {
 	if timeoutSec <= 0 {
 		timeoutSec = 5
 	}
@@ -67,15 +72,13 @@ func (s *discoveryService) Discover(ctx context.Context, timeoutSec int) ([]Disc
 	}
 	ch := make(chan result, 1)
 	go func() {
-		devices, err := wsdiscovery.GetAvailableDevicesAtSpecificEthernetInterface("")
+		devices, err := multicastProbe(interfaceName, time.Duration(timeoutSec)*time.Second)
 		ch <- result{devices, err}
 	}()
 
 	var r result
 	select {
 	case r = <-ch:
-	case <-time.After(time.Duration(timeoutSec) * time.Second):
-		return nil, fmt.Errorf("discovery timed out after %ds", timeoutSec)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -98,8 +101,18 @@ func (s *discoveryService) Discover(ctx context.Context, timeoutSec int) ([]Disc
 		default:
 		}
 
-		params := d.GetDeviceParams()
 		info := d.GetDeviceInfo()
+
+		// Filter out non-camera WS-Discovery responders (Synology NAS,
+		// printers, scanners, Windows machines) that answer any Probe
+		// regardless of type filter. Adapted from MiBeeNvr (#266 fix).
+		if !isONVIFCamera(info.Manufacturer, info.Model) {
+			logger.Debugf("ONVIF discovery: skipping non-camera device manufacturer=%q model=%q",
+				info.Manufacturer, info.Model)
+			continue
+		}
+
+		params := d.GetDeviceParams()
 
 		dev := DiscoveredDevice{
 			IP:           parseIP(params.Xaddr),
@@ -253,6 +266,34 @@ func parseIP(addr string) string {
 		}
 	}
 	return addr
+}
+
+// isONVIFCamera heuristically filters non-camera WS-Discovery responders.
+// Many NAS devices (Synology), printers, and Windows machines respond to
+// ANY WS-Discovery Probe regardless of the d:Types filter. They typically
+// advertise manufacturer/model strings that are clearly not cameras.
+//
+// Filtering at the discovery boundary prevents empty-shell camera records
+// from being created for devices that can never stream video.
+// Adapted from MiBeeNvr (MIT License, issue #266).
+func isONVIFCamera(manufacturer, model string) bool {
+	m := strings.ToLower(manufacturer)
+	md := strings.ToLower(model)
+
+	// Known non-camera WS-Discovery responders.
+	nonCamera := []string{
+		"synology", "qnap", "western digital", "wd ", "seagate",
+		"hewlett-packard", "hp ", "canon", "epson", "brother",
+		"xerox", "ricoh", "lexmark", "samsung printer", "windows",
+		"microsoft", "netgear", "cisco", "ubiquiti", "aruba",
+		"raspberry pi",
+	}
+	for _, nc := range nonCamera {
+		if strings.Contains(m, nc) || strings.Contains(md, nc) {
+			return false
+		}
+	}
+	return true
 }
 
 func parsePort(addr string) int {

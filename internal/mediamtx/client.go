@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"aiovms/pkg/backoff"
 	"aiovms/pkg/logger"
 	"aiovms/pkg/metrics"
 )
@@ -150,26 +151,60 @@ func (c *Client) HealthCheck() error {
 	return nil
 }
 
-func (c *Client) do(req *http.Request) error {
-	start := time.Now()
-	resp, err := c.httpClient.Do(req)
-	status := "ok"
-	if err != nil {
-		status = "error"
-		metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, status).Observe(time.Since(start).Seconds())
-		return fmt.Errorf("mediamtx request: %w", err)
-	}
-	defer resp.Body.Close()
+// do performs a single request with retry on transient network errors.
+// 4xx (client errors, e.g. path already exists) are NOT retried — they are
+// deterministic and retrying would just waste time. Network errors (dial,
+// connection reset, timeout) are retried with tiered backoff so a brief
+// MediaMTX restart or network blip doesn't fail the whole operation.
+const maxRetries = 3
 
-	if resp.StatusCode >= 400 {
-		status = "error"
-		body, _ := io.ReadAll(resp.Body)
-		logger.Errorf("mediamtx %s %s -> %d: %s", req.Method, req.URL.Path, resp.StatusCode, string(body))
-		metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, status).Observe(time.Since(start).Seconds())
-		return fmt.Errorf("mediamtx error %d: %s", resp.StatusCode, string(body))
+func (c *Client) do(req *http.Request) error {
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// Rebuild the request body for retries — the body reader is consumed
+			// by the first attempt.
+			if req.Body != nil {
+				// MediaMTX methods use json.Marshal'd bytes; re-marshal isn't
+				// possible generically here, so we clone from the original.
+				// Simpler: only retry bodyless requests is too restrictive.
+				// Instead, rely on GetBody if available; otherwise skip retry.
+				if req.GetBody == nil {
+					return lastErr
+				}
+				body, err := req.GetBody()
+				if err != nil {
+					return fmt.Errorf("reconstruct request body: %w", err)
+				}
+				req.Body = body
+			}
+			delay := backoff.TieredBackoffWithJitter(attempt)
+			logger.Warnf("mediamtx %s %s retry %d/%d in %s", req.Method, req.URL.Path, attempt, maxRetries-1, delay)
+			time.Sleep(delay)
+		}
+
+		start := time.Now()
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			status := "error"
+			metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, status).Observe(time.Since(start).Seconds())
+			lastErr = fmt.Errorf("mediamtx request: %w", err)
+			continue // transient network error, retry
+		}
+
+		if resp.StatusCode >= 400 {
+			status := "error"
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			logger.Errorf("mediamtx %s %s -> %d: %s", req.Method, req.URL.Path, resp.StatusCode, string(body))
+			metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, status).Observe(time.Since(start).Seconds())
+			return fmt.Errorf("mediamtx error %d: %s", resp.StatusCode, string(body))
+		}
+		resp.Body.Close()
+		metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, "ok").Observe(time.Since(start).Seconds())
+		return nil
 	}
-	metrics.MediaMTXAPIDuration.WithLabelValues(req.Method, status).Observe(time.Since(start).Seconds())
-	return nil
+	return lastErr
 }
 
 // PathConfig is the payload for AddPath.

@@ -29,6 +29,18 @@ func (m *mockRepoForRetention) Delete(rec *model.Recording) error {
 	return nil
 }
 
+func (m *mockRepoForRetention) DeleteByIDs(ids []string) error {
+	for _, id := range ids {
+		for _, r := range m.recs {
+			if r.ID == id {
+				m.deletedPaths = append(m.deletedPaths, r.FilePath)
+				break
+			}
+		}
+	}
+	return nil
+}
+
 func (m *mockRepoForRetention) FindOlderThan(cutoff time.Time) ([]model.Recording, error) {
 	var result []model.Recording
 	for _, r := range m.recs {
@@ -37,6 +49,29 @@ func (m *mockRepoForRetention) FindOlderThan(cutoff time.Time) ([]model.Recordin
 		}
 	}
 	return result, nil
+}
+
+func (m *mockRepoForRetention) FindOlderThanByStatus(cutoff time.Time, status string) ([]model.Recording, error) {
+	var result []model.Recording
+	for _, r := range m.recs {
+		if r.StartTime.Before(cutoff) && r.Status == status {
+			result = append(result, r)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockRepoForRetention) FindOldestComplete(limit int) ([]model.Recording, error) {
+	var complete []model.Recording
+	for _, r := range m.recs {
+		if r.Status == "complete" {
+			complete = append(complete, r)
+		}
+	}
+	if len(complete) > limit {
+		return complete[:limit], nil
+	}
+	return complete, nil
 }
 
 func (m *mockRepoForRetention) FindAllSortedByTime() ([]model.Recording, error) {
@@ -62,9 +97,9 @@ func TestCleanupByAge(t *testing.T) {
 
 	mock := &mockRepoForRetention{
 		recs: []model.Recording{
-			{ID: "1", FilePath: "/tmp/old1.mp4", StartTime: now.Add(-8 * 24 * time.Hour)},
-			{ID: "2", FilePath: "/tmp/old2.mp4", StartTime: now.Add(-9 * 24 * time.Hour)},
-			{ID: "3", FilePath: "/tmp/new1.mp4", StartTime: now.Add(-2 * 24 * time.Hour)},
+			{ID: "1", FilePath: "/tmp/old1.mp4", StartTime: now.Add(-8 * 24 * time.Hour), Status: "complete"},
+			{ID: "2", FilePath: "/tmp/old2.mp4", StartTime: now.Add(-9 * 24 * time.Hour), Status: "complete"},
+			{ID: "3", FilePath: "/tmp/new1.mp4", StartTime: now.Add(-2 * 24 * time.Hour), Status: "complete"},
 		},
 	}
 
@@ -93,7 +128,7 @@ func TestCleanupByAgeNoOldRecords(t *testing.T) {
 
 	mock := &mockRepoForRetention{
 		recs: []model.Recording{
-			{ID: "1", FilePath: "/tmp/new1.mp4", StartTime: now.Add(-1 * 24 * time.Hour)},
+			{ID: "1", FilePath: "/tmp/new1.mp4", StartTime: now.Add(-1 * 24 * time.Hour), Status: "complete"},
 		},
 	}
 

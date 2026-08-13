@@ -367,7 +367,8 @@ func (h *Handler) StreamWebRTC(c *gin.Context) {
 // @Router /cameras/discover [post]
 func (h *Handler) Discover(c *gin.Context) {
 	var req struct {
-		TimeoutSec int `json:"timeout_sec"`
+		TimeoutSec    int    `json:"timeout_sec"`
+		InterfaceName string `json:"interface_name"`
 	}
 	// Body is optional; default 5s when empty or field missing.
 	if c.Request.ContentLength > 0 {
@@ -380,7 +381,7 @@ func (h *Handler) Discover(c *gin.Context) {
 	if timeoutSec <= 0 {
 		timeoutSec = 5
 	}
-	devices, err := h.svc.Discover(c.Request.Context(), timeoutSec)
+	devices, err := h.svc.Discover(c.Request.Context(), req.InterfaceName, timeoutSec)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
