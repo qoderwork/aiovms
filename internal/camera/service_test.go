@@ -120,25 +120,28 @@ func (m *mockRepo) FindByMediaMTXPath(path string) (*model.Camera, error) {
 	return nil, errors.New("not found")
 }
 
-type mockMTX struct {
-	addPathCalls    []struct{ name string; cfg mediamtx.PathConfig }
-	addPathErr      error
+type mockActuator struct {
+	ensurePathCalls []struct{ name string; cfg mediamtx.PathConfig }
+	ensurePathErr   error
 	deletePathCalls []string
 	deletePathErr   error
 }
 
-func (m *mockMTX) AddPath(name string, cfg mediamtx.PathConfig) error {
-	m.addPathCalls = append(m.addPathCalls, struct {
+func (m *mockActuator) EnsurePath(name string, cfg mediamtx.PathConfig) error {
+	m.ensurePathCalls = append(m.ensurePathCalls, struct {
 		name string
 		cfg  mediamtx.PathConfig
 	}{name, cfg})
-	return m.addPathErr
+	return m.ensurePathErr
 }
-func (m *mockMTX) DeletePath(name string) error {
+func (m *mockActuator) DeletePath(name string) error {
 	m.deletePathCalls = append(m.deletePathCalls, name)
 	return m.deletePathErr
 }
-func (m *mockMTX) SnapshotPath(name string) string { return "/snapshot/" + name }
+
+type mockSnapshotter struct{}
+
+func (m *mockSnapshotter) SnapshotPath(name string) string { return "/snapshot/" + name }
 
 // --- helpers ---
 
@@ -158,7 +161,7 @@ func TestServiceList(t *testing.T) {
 	repo.cams["b"] = &model.Camera{ID: "b", Name: "cam-b", LicenseID: 100}
 	repo.cams["c"] = &model.Camera{ID: "c", Name: "cam-c", LicenseID: 200}
 
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 	cams, total, err := svc.List(context.Background(), 100, "", 1, 10)
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -174,7 +177,7 @@ func TestServiceList(t *testing.T) {
 func TestServiceGetFound(t *testing.T) {
 	repo := newMockRepo()
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", Name: "test-cam"}
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 	cam, err := svc.Get(context.Background(), 0, "id-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -186,7 +189,7 @@ func TestServiceGetFound(t *testing.T) {
 
 func TestServiceGetNotFound(t *testing.T) {
 	repo := newMockRepo()
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 	_, err := svc.Get(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -198,7 +201,7 @@ func TestServiceGetNotFound(t *testing.T) {
 func TestServiceGetCrossTenantForbidden(t *testing.T) {
 	repo := newMockRepo()
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", Name: "other-tenant-cam", LicenseID: 100}
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 	_, err := svc.Get(context.Background(), 200, "id-1")
 	if err == nil {
 		t.Fatal("expected forbidden error, got nil")
@@ -215,8 +218,8 @@ func TestServiceGetCrossTenantForbidden(t *testing.T) {
 func TestServiceCreate(t *testing.T) {
 	initCrypto(t)
 	repo := newMockRepo()
-	mtx := &mockMTX{}
-	svc := &service{repo: repo, mtx: mtx}
+	act := &mockActuator{}
+	svc := &service{repo: repo, act: act, snap: &mockSnapshotter{}}
 
 	err := svc.Create(context.Background(), &model.Camera{
 		Name:     "new-cam",
@@ -247,8 +250,8 @@ func TestServiceCreate(t *testing.T) {
 	if repo.lastCreated.Status != "connecting" {
 		t.Errorf("status = %q, want 'connecting'", repo.lastCreated.Status)
 	}
-	if len(mtx.addPathCalls) != 1 {
-		t.Errorf("expected 1 AddPath call, got %d", len(mtx.addPathCalls))
+	if len(act.ensurePathCalls) != 1 {
+		t.Errorf("expected 1 EnsurePath call, got %d", len(act.ensurePathCalls))
 	}
 }
 
@@ -259,7 +262,7 @@ func TestServiceUpdate(t *testing.T) {
 		ID: "id-1", Name: "old-name", IP: "10.0.0.1",
 		MediaMTXPath: "cam-id-1",
 	}
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 
 	siteID := "site-9"
 	lat, lon := 31.230400, 121.473700
@@ -311,7 +314,7 @@ func TestServiceUpdate(t *testing.T) {
 
 func TestServiceUpdateNotFound(t *testing.T) {
 	repo := newMockRepo()
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 	err := svc.Update(context.Background(), 0, "no-such-id", &model.Camera{Name: "x"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -324,7 +327,7 @@ func TestServiceUpdateCrossTenantForbidden(t *testing.T) {
 	initCrypto(t)
 	repo := newMockRepo()
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", Name: "other", LicenseID: 100, MediaMTXPath: "cam-id-1"}
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 	err := svc.Update(context.Background(), 200, "id-1", &model.Camera{
 		Name: "hacked", IP: "10.0.0.9", Port: 554, Protocol: "RTSP",
 		StreamURL: "rtsp://10.0.0.9/stream",
@@ -344,8 +347,8 @@ func TestServiceUpdateCrossTenantForbidden(t *testing.T) {
 func TestServiceDelete(t *testing.T) {
 	repo := newMockRepo()
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", MediaMTXPath: "cam-id-1"}
-	mtx := &mockMTX{}
-	svc := &service{repo: repo, mtx: mtx}
+	act := &mockActuator{}
+	svc := &service{repo: repo, act: act, snap: &mockSnapshotter{}}
 
 	err := svc.Delete(context.Background(), 0, "id-1")
 	if err != nil {
@@ -354,14 +357,14 @@ func TestServiceDelete(t *testing.T) {
 	if repo.lastDeleted != "id-1" {
 		t.Errorf("deleted = %q, want 'id-1'", repo.lastDeleted)
 	}
-	if len(mtx.deletePathCalls) != 1 {
-		t.Errorf("expected 1 DeletePath call, got %d", len(mtx.deletePathCalls))
+	if len(act.deletePathCalls) != 1 {
+		t.Errorf("expected 1 DeletePath call, got %d", len(act.deletePathCalls))
 	}
 }
 
 func TestServiceDeleteNotFound(t *testing.T) {
 	repo := newMockRepo()
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 	err := svc.Delete(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -373,8 +376,8 @@ func TestServiceDeleteNotFound(t *testing.T) {
 func TestServiceDeleteCrossTenantForbidden(t *testing.T) {
 	repo := newMockRepo()
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", LicenseID: 100, MediaMTXPath: "cam-id-1"}
-	mtx := &mockMTX{}
-	svc := &service{repo: repo, mtx: mtx}
+	act := &mockActuator{}
+	svc := &service{repo: repo, act: act, snap: &mockSnapshotter{}}
 	err := svc.Delete(context.Background(), 200, "id-1")
 	if err == nil {
 		t.Fatal("expected forbidden error, got nil")
@@ -382,8 +385,8 @@ func TestServiceDeleteCrossTenantForbidden(t *testing.T) {
 	if _, exists := repo.cams["id-1"]; !exists {
 		t.Error("camera was deleted across tenants")
 	}
-	if len(mtx.deletePathCalls) != 0 {
-		t.Errorf("expected no DeletePath call on forbidden delete, got %d", len(mtx.deletePathCalls))
+	if len(act.deletePathCalls) != 0 {
+		t.Errorf("expected no DeletePath call on forbidden delete, got %d", len(act.deletePathCalls))
 	}
 }
 
@@ -393,7 +396,7 @@ func TestServiceConnect(t *testing.T) {
 		ID: "id-1", MediaMTXPath: "cam-id-1",
 		StreamURL: "rtsp://10.0.0.1/stream",
 	}
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 
 	err := svc.Connect(context.Background(), 0, "id-1")
 	if err != nil {
@@ -410,8 +413,7 @@ func TestServiceDisconnect(t *testing.T) {
 	repo.cams["id-1"] = &model.Camera{
 		ID: "id-1", MediaMTXPath: "cam-id-1", Status: "online",
 	}
-	mtx := &mockMTX{}
-	svc := &service{repo: repo, mtx: mtx}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 
 	err := svc.Disconnect(context.Background(), 0, "id-1")
 	if err != nil {
@@ -426,7 +428,7 @@ func TestServiceDisconnect(t *testing.T) {
 func TestServiceGetStreamURLs(t *testing.T) {
 	repo := newMockRepo()
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", MediaMTXPath: "cam-id-1"}
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 
 	urls, err := svc.GetStreamURLs(context.Background(), 0, "id-1")
 	if err != nil {
@@ -446,7 +448,7 @@ func TestServiceGetStreamURLs(t *testing.T) {
 func TestServiceSnapshot(t *testing.T) {
 	repo := newMockRepo()
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", MediaMTXPath: "cam-id-1"}
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 
 	result, err := svc.Snapshot(context.Background(), 0, "id-1")
 	if err != nil {
@@ -461,7 +463,7 @@ func TestServiceListStatuses(t *testing.T) {
 	repo := newMockRepo()
 	repo.cams["a"] = &model.Camera{ID: "a", Status: "online", LicenseID: 100}
 	repo.cams["b"] = &model.Camera{ID: "b", Status: "offline", LicenseID: 200}
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 
 	statuses, err := svc.ListStatuses(context.Background())
 	if err != nil {
@@ -474,7 +476,7 @@ func TestServiceListStatuses(t *testing.T) {
 
 func TestServiceConnectNotFound(t *testing.T) {
 	repo := newMockRepo()
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 	err := svc.Connect(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -483,7 +485,7 @@ func TestServiceConnectNotFound(t *testing.T) {
 
 func TestServiceDisconnectNotFound(t *testing.T) {
 	repo := newMockRepo()
-	svc := &service{repo: repo, mtx: &mockMTX{}}
+	svc := &service{repo: repo, act: &mockActuator{}, snap: &mockSnapshotter{}}
 	err := svc.Disconnect(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")

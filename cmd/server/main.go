@@ -114,7 +114,7 @@ func main() {
 
 	// 8. Bootstrap layers
 	camRepo := camera.NewRepository(db)
-	cameraSvc := camera.NewService(camRepo, mtxClient, cfg.Recording.Path, cfg.Recording.SegmentDuration)
+	cameraSvc := camera.NewService(camRepo, actuator, mtxClient, cfg.Recording.Path, cfg.Recording.SegmentDuration)
 
 	recRepo := recording.NewRepository(db)
 	recSvc := recording.NewService(recRepo, cameraSvc, actuator)

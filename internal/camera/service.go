@@ -48,22 +48,28 @@ type SnapshotResult struct {
 	ImageURL string `json:"image_url"`
 }
 
-// mediaMTXClient abstracts MediaMTX HTTP API for testability.
-type mediaMTXClient interface {
-	AddPath(name string, cfg mediamtx.PathConfig) error
+// cameraActuator abstracts the MediaMTX actuator (single writer) for
+// testability: path lifecycle mutations go through it, serially and retried.
+type cameraActuator interface {
+	EnsurePath(name string, cfg mediamtx.PathConfig) error
 	DeletePath(name string) error
+}
+
+// snapshotter builds snapshot URLs (pure function, no MediaMTX mutation).
+type snapshotter interface {
 	SnapshotPath(name string) string
 }
 
 type service struct {
-	repo           Repository
-	mtx            mediaMTXClient
-	recordPath     string
+	repo            Repository
+	act             cameraActuator
+	snap            snapshotter
+	recordPath      string
 	segmentDuration string
 }
 
-func NewService(repo Repository, mtx *mediamtx.Client, recordPath, segmentDuration string) Service {
-	return &service{repo: repo, mtx: mtx, recordPath: recordPath, segmentDuration: segmentDuration}
+func NewService(repo Repository, act cameraActuator, snap snapshotter, recordPath, segmentDuration string) Service {
+	return &service{repo: repo, act: act, snap: snap, recordPath: recordPath, segmentDuration: segmentDuration}
 }
 
 // getForTenant loads a camera and enforces tenant isolation.
@@ -155,7 +161,7 @@ func (s *service) Create(ctx context.Context, cam *model.Camera) error {
 	}
 
 	// 一期仅注册主码流（stream_url）到 MediaMTX；sub_stream_url 暂未注册，二期实现子码流预览/录制时启用。
-	if err := s.mtx.AddPath(cam.MediaMTXPath, s.buildPathConfig(cam)); err != nil {
+	if err := s.act.EnsurePath(cam.MediaMTXPath, s.buildPathConfig(cam)); err != nil {
 		logger.Errorf("mediamtx register failed for camera %s: %v", cam.ID, err)
 		_ = s.repo.UpdateStatus(cam.ID, "error")
 		return apperror.Wrap(err, 50301, 503, "failed to register camera to mediamtx")
@@ -224,7 +230,7 @@ func (s *service) Update(ctx context.Context, tenantID int64, id string, cam *mo
 	}
 
 	// 重新注册主码流（一期不注册子码流）
-	if err := s.mtx.AddPath(existing.MediaMTXPath, s.buildPathConfig(existing)); err != nil {
+	if err := s.act.EnsurePath(existing.MediaMTXPath, s.buildPathConfig(existing)); err != nil {
 		logger.Errorf("mediamtx re-register failed for camera %s: %v", id, err)
 		return apperror.Wrap(err, 50301, 503, "failed to re-register camera to mediamtx")
 	}
@@ -237,7 +243,9 @@ func (s *service) Delete(ctx context.Context, tenantID int64, id string) error {
 	if err != nil {
 		return err
 	}
-	_ = s.mtx.DeletePath(cam.MediaMTXPath)
+	// Path removal is enqueued best-effort; if it fails, the reconciler's
+	// orphan-path cleanup removes the stale path on a later cycle.
+	_ = s.act.DeletePath(cam.MediaMTXPath)
 	return s.repo.Delete(id)
 }
 
@@ -248,7 +256,7 @@ func (s *service) DeleteAll(ctx context.Context, tenantID int64) (int64, error) 
 	}
 	// Best-effort delete MediaMTX paths.
 	for _, cam := range cams {
-		_ = s.mtx.DeletePath(cam.MediaMTXPath)
+		_ = s.act.DeletePath(cam.MediaMTXPath)
 	}
 	count, err := s.repo.DeleteAllByTenant(tenantID)
 	if err != nil {
@@ -262,7 +270,7 @@ func (s *service) Connect(ctx context.Context, tenantID int64, id string) error 
 	if err != nil {
 		return err
 	}
-	if err := s.mtx.AddPath(cam.MediaMTXPath, s.buildPathConfig(cam)); err != nil {
+	if err := s.act.EnsurePath(cam.MediaMTXPath, s.buildPathConfig(cam)); err != nil {
 		return err
 	}
 	// Mark as connecting; StatusChecker will probe to online/offline.
@@ -274,7 +282,7 @@ func (s *service) Disconnect(ctx context.Context, tenantID int64, id string) err
 	if err != nil {
 		return err
 	}
-	if err := s.mtx.DeletePath(cam.MediaMTXPath); err != nil {
+	if err := s.act.DeletePath(cam.MediaMTXPath); err != nil {
 		return err
 	}
 	// Mark as disconnected (manually detached, not probed offline).
@@ -417,7 +425,7 @@ func (s *service) Snapshot(ctx context.Context, tenantID int64, id string) (*Sna
 	}
 	return &SnapshotResult{
 		CameraID: cam.ID,
-		ImageURL: s.mtx.SnapshotPath(cam.MediaMTXPath),
+		ImageURL: s.snap.SnapshotPath(cam.MediaMTXPath),
 	}, nil
 }
 
