@@ -88,8 +88,9 @@ type Reconciler struct {
 	reader  MTXReader
 	act     MTXActuator
 
-	recordPath     string
+	recordPath      string
 	segmentDuration string
+	hookCommand     string
 
 	mtxDown      bool
 	probeCounter int
@@ -110,7 +111,7 @@ func NewReconciler(
 	recRepo RecordingRepo,
 	reader MTXReader,
 	act MTXActuator,
-	recordPath, segmentDuration string,
+	recordPath, segmentDuration, hookCommand string,
 ) *Reconciler {
 	return &Reconciler{
 		camRepo:           camRepo,
@@ -120,6 +121,7 @@ func NewReconciler(
 		act:               act,
 		recordPath:        recordPath,
 		segmentDuration:   segmentDuration,
+		hookCommand:       hookCommand,
 		orphanRecordTicks: make(map[string]int),
 		stopCh:            make(chan struct{}),
 	}
@@ -271,26 +273,35 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 
 		existing, exists := mtxConfigs[cam.MediaMTXPath]
 		if exists {
-			// Only compare source for drift detection.
+			// Drift comparison covers source and the segment-complete hook.
 			// sourceOnDemand is intentionally EXCLUDED: it is dynamically managed
 			// by the recording logic (false while recording, true otherwise).
 			// Including it here caused reconcileStreams to fight with reconcileRecording,
 			// deleting the path every 10s and breaking recording into ~20s fragments.
-			if existing.Source == cam.StreamURL {
-				continue // source matches, nothing to do
+			hookDrift := existing.RunOnRecordSegmentComplete != r.hookCommand
+			if existing.Source == cam.StreamURL && !hookDrift {
+				continue // everything matches, nothing to do
 			}
-			// Source changed — delete and re-add. The actuator serializes
-			// per-path mutations, so the ensure lands after the delete.
-			logger.Warnf("reconcile streams: drift detected for %s (source %q -> %q)",
-				cam.MediaMTXPath, existing.Source, cam.StreamURL)
-			r.act.EnqueueDeletePath(cam.MediaMTXPath)
+			if existing.Source != cam.StreamURL {
+				// Source changed — delete and re-add. The actuator serializes
+				// per-path mutations, so the ensure lands after the delete.
+				logger.Warnf("reconcile streams: drift detected for %s (source %q -> %q)",
+					cam.MediaMTXPath, existing.Source, cam.StreamURL)
+				r.act.EnqueueDeletePath(cam.MediaMTXPath)
+			} else {
+				// Hook config drifted (e.g. right after an upgrade): converge
+				// via EnsurePath, whose add-conflict fallback patches the full
+				// desired config in place — no delete, no stream interruption.
+				logger.Infof("reconcile streams: hook config drift for %s, converging", cam.MediaMTXPath)
+			}
 		}
 
 		r.act.EnqueueEnsurePath(cam.MediaMTXPath, mediamtx.PathConfig{
-			Source:                cam.StreamURL,
-			SourceOnDemand:        true,
-			RecordPath:            r.recordPath + "/%path/%Y-%m-%d_%H-%M-%S",
-			RecordSegmentDuration: r.segmentDuration,
+			Source:                     cam.StreamURL,
+			SourceOnDemand:             true,
+			RecordPath:                 r.recordPath + "/%path/%Y-%m-%d_%H-%M-%S",
+			RecordSegmentDuration:      r.segmentDuration,
+			RunOnRecordSegmentComplete: r.hookCommand,
 		})
 		logger.Infof("reconcile streams: ensured path %s for camera %s", cam.MediaMTXPath, cam.ID)
 		_ = r.camRepo.UpdateStatus(cam.ID, "connecting")
@@ -498,7 +509,7 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 //   - disconnected: skip (user explicitly detached; probe must not override)
 //   - error:        skip (system error state; probe must not auto-clear)
 //   - connecting:   probe, but only transition to online (grace period —
-//                   don't write offline on first probe to avoid UI flicker)
+//     don't write offline on first probe to avoid UI flicker)
 //   - online/offline: probe normally
 func (r *Reconciler) reconcileCameraStatus() {
 	cams, err := r.camRepo.FindAll()

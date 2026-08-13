@@ -19,7 +19,7 @@ type mockRepo struct {
 	findAllErr  error
 	upsertErr   error
 
-	lastDeleted *model.Recording
+	lastDeleted  *model.Recording
 	lastUpserted *model.Recording
 
 	// session mock state
@@ -35,8 +35,8 @@ func newMockRepo() *mockRepo {
 	return &mockRepo{recs: make(map[string]*model.Recording)}
 }
 
-func (m *mockRepo) Create(rec *model.Recording) error                 { return nil }
-func (m *mockRepo) Update(rec *model.Recording) error                 { return nil }
+func (m *mockRepo) Create(rec *model.Recording) error { return nil }
+func (m *mockRepo) Update(rec *model.Recording) error { return nil }
 func (m *mockRepo) Upsert(rec *model.Recording) error {
 	if m.upsertErr != nil {
 		return m.upsertErr
@@ -89,13 +89,13 @@ func (m *mockRepo) DeleteByIDs(ids []string) error {
 	}
 	return nil
 }
-func (m *mockRepo) FindByPath(filePath string) (*model.Recording, error) { return nil, nil }
-func (m *mockRepo) FindOlderThan(cutoff time.Time) ([]model.Recording, error)  { return nil, nil }
+func (m *mockRepo) FindByPath(filePath string) (*model.Recording, error)      { return nil, nil }
+func (m *mockRepo) FindOlderThan(cutoff time.Time) ([]model.Recording, error) { return nil, nil }
 func (m *mockRepo) FindOlderThanByStatus(cutoff time.Time, status string) ([]model.Recording, error) {
 	return nil, nil
 }
-func (m *mockRepo) FindOldestComplete(limit int) ([]model.Recording, error)        { return nil, nil }
-func (m *mockRepo) FindAllSortedByTime() ([]model.Recording, error)               { return nil, nil }
+func (m *mockRepo) FindOldestComplete(limit int) ([]model.Recording, error) { return nil, nil }
+func (m *mockRepo) FindAllSortedByTime() ([]model.Recording, error)         { return nil, nil }
 
 // --- session mock impl ---
 
@@ -135,7 +135,7 @@ func (m *mockRepo) FindSessionByCameraAndTime(cameraID string, t time.Time) (*mo
 }
 
 type mockCameraSvc struct {
-	cams  map[string]*model.Camera
+	cams   map[string]*model.Camera
 	getErr error
 }
 
@@ -151,12 +151,18 @@ func (m *mockCameraSvc) Get(ctx context.Context, tenantID int64, id string) (*mo
 }
 
 type mockActuator struct {
-	setRecordCalls []struct{ path string; on bool }
-	setRecordErr   error
+	setRecordCalls []struct {
+		path string
+		on   bool
+	}
+	setRecordErr error
 }
 
 func (m *mockActuator) SetRecord(path string, on bool) error {
-	m.setRecordCalls = append(m.setRecordCalls, struct{ path string; on bool }{path, on})
+	m.setRecordCalls = append(m.setRecordCalls, struct {
+		path string
+		on   bool
+	}{path, on})
 	return m.setRecordErr
 }
 

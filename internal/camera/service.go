@@ -66,10 +66,11 @@ type service struct {
 	snap            snapshotter
 	recordPath      string
 	segmentDuration string
+	hookCommand     string
 }
 
-func NewService(repo Repository, act cameraActuator, snap snapshotter, recordPath, segmentDuration string) Service {
-	return &service{repo: repo, act: act, snap: snap, recordPath: recordPath, segmentDuration: segmentDuration}
+func NewService(repo Repository, act cameraActuator, snap snapshotter, recordPath, segmentDuration, hookCommand string) Service {
+	return &service{repo: repo, act: act, snap: snap, recordPath: recordPath, segmentDuration: segmentDuration, hookCommand: hookCommand}
 }
 
 // getForTenant loads a camera and enforces tenant isolation.
@@ -90,15 +91,16 @@ func (s *service) getForTenant(tenantID int64, id string) (*model.Camera, error)
 // buildPathConfig constructs the self-contained PathConfig for a camera.
 // 显式下发 recordPath 和 recordSegmentDuration，避免依赖 mediamtx.yml 的 all_others 继承
 // （显式 add 的命名路径不会继承 all_others，会用 setDefaults 硬编码默认值）。
+// hookCommand 为空时该字段被 omitempty 省略，即不启用分片完成回调。
 func (s *service) buildPathConfig(cam *model.Camera) mediamtx.PathConfig {
 	return mediamtx.PathConfig{
-		Source:                cam.StreamURL,
-		SourceOnDemand:        true,
-		RecordPath:            s.recordPath + "/%path/%Y-%m-%d_%H-%M-%S",
-		RecordSegmentDuration: s.segmentDuration,
+		Source:                     cam.StreamURL,
+		SourceOnDemand:             true,
+		RecordPath:                 s.recordPath + "/%path/%Y-%m-%d_%H-%M-%S",
+		RecordSegmentDuration:      s.segmentDuration,
+		RunOnRecordSegmentComplete: s.hookCommand,
 	}
 }
-
 
 type StreamURLs struct {
 	FLV    string `json:"flv"`

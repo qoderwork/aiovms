@@ -12,7 +12,10 @@ authInternalUsers:
       - action: api
       - action: metrics
 # 录像存储到 /recordings，按 路径名/日期 分层
-# recordSegmentDuration: 每 1 分钟切一个分片，scanner 能较快收录已完成片段
+# recordSegmentDuration: 每 1 分钟切一个分片
+# 注意：cam-* 路径由 aiovms 通过 API 动态下发（含 recordPath、分片时长和
+# runOnRecordSegmentComplete 回调），显式 add 的命名路径不会继承下面的
+# all_others 配置，此处仅作为其他路径的默认值。
 paths:
   all_others:
     record: false

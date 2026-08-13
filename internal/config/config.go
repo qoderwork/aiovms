@@ -3,8 +3,8 @@ package config
 import (
 	"fmt"
 
-	"github.com/spf13/viper"
 	"aiovms/pkg/logger"
+	"github.com/spf13/viper"
 )
 
 type Config struct {
@@ -55,8 +55,10 @@ type MediaMTXConfig struct {
 type RecordingConfig struct {
 	Path            string `mapstructure:"path"`
 	RetentionDays   int    `mapstructure:"retention_days"`
-	DiskWatermark   int    `mapstructure:"disk_watermark"`     // percentage, e.g. 90
-	SegmentDuration string `mapstructure:"segment_duration"`   // MediaMTX recordSegmentDuration, e.g. "1m"
+	DiskWatermark   int    `mapstructure:"disk_watermark"`    // percentage, e.g. 90
+	SegmentDuration string `mapstructure:"segment_duration"`  // MediaMTX recordSegmentDuration, e.g. "1m"
+	ScanIntervalSec int    `mapstructure:"scan_interval_sec"` // disk scan fallback interval; hook is the fast path
+	HookBaseURL     string `mapstructure:"hook_base_url"`     // aiovms URL reachable FROM the mediamtx container; empty disables the hook
 }
 
 func Load(configPath string) (*Config, error) {
@@ -79,6 +81,7 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("recording.retention_days", 7)
 	v.SetDefault("recording.disk_watermark", 90)
 	v.SetDefault("recording.segment_duration", "1m")
+	v.SetDefault("recording.scan_interval_sec", 30)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config: %w", err)

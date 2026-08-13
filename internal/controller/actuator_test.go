@@ -13,8 +13,11 @@ import (
 // --- mock MediaMTX writer ---
 
 type mockMTXWriter struct {
-	mu              sync.Mutex
-	addPathCalls    []struct{ name string; cfg mediamtx.PathConfig }
+	mu           sync.Mutex
+	addPathCalls []struct {
+		name string
+		cfg  mediamtx.PathConfig
+	}
 	deletePathCalls []string
 	patchPathCalls  []struct {
 		name  string

@@ -160,9 +160,15 @@ func (m *mockMTXReader) HealthCheck() error {
 
 // mockActuator implements MTXActuator (write surface; records enqueued commands).
 type mockActuator struct {
-	ensurePathCalls []struct{ name string; cfg mediamtx.PathConfig }
+	ensurePathCalls []struct {
+		name string
+		cfg  mediamtx.PathConfig
+	}
 	deletePathCalls []string
-	setRecordCalls  []struct{ path string; on bool }
+	setRecordCalls  []struct {
+		path string
+		on   bool
+	}
 }
 
 func (m *mockActuator) EnqueueEnsurePath(name string, cfg mediamtx.PathConfig) {
@@ -177,7 +183,10 @@ func (m *mockActuator) EnqueueDeletePath(name string) {
 }
 
 func (m *mockActuator) EnqueueSetRecord(path string, on bool) {
-	m.setRecordCalls = append(m.setRecordCalls, struct{ path string; on bool }{path, on})
+	m.setRecordCalls = append(m.setRecordCalls, struct {
+		path string
+		on   bool
+	}{path, on})
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +201,7 @@ func newTestReconciler() (*Reconciler, *mockCameraRepo, *mockScheduleRepo, *mock
 		pathConfigs: make(map[string]mediamtx.PathConfigItem),
 	}
 	act := &mockActuator{}
-	r := NewReconciler(camRepo, schRepo, recRepo, reader, act, "/recordings", "1h")
+	r := NewReconciler(camRepo, schRepo, recRepo, reader, act, "/recordings", "1h", "")
 	return r, camRepo, schRepo, recRepo, reader, act
 }
 

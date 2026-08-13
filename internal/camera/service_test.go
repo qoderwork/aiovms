@@ -89,11 +89,11 @@ func (m *mockRepo) Delete(id string) error {
 	return nil
 }
 func (m *mockRepo) FindAllByTenant(_ int64) ([]model.Camera, error) { return nil, nil }
-func (m *mockRepo) DeleteAllByTenant(_ int64) (int64, error)       { return 0, nil }
+func (m *mockRepo) DeleteAllByTenant(_ int64) (int64, error)        { return 0, nil }
 func (m *mockRepo) ExistsByIPPort(_ int64, _ string, _ int, _ string) (bool, error) {
 	return false, nil
 }
-func (m *mockRepo) ExistsByName(_ int64, _ string, _ string) (bool, error)    { return false, nil }
+func (m *mockRepo) ExistsByName(_ int64, _ string, _ string) (bool, error)      { return false, nil }
 func (m *mockRepo) ExistsByStreamURL(_ int64, _ string, _ string) (bool, error) { return false, nil }
 func (m *mockRepo) FindAll() ([]model.Camera, error) {
 	if m.findAllErr != nil {
@@ -121,7 +121,10 @@ func (m *mockRepo) FindByMediaMTXPath(path string) (*model.Camera, error) {
 }
 
 type mockActuator struct {
-	ensurePathCalls []struct{ name string; cfg mediamtx.PathConfig }
+	ensurePathCalls []struct {
+		name string
+		cfg  mediamtx.PathConfig
+	}
 	ensurePathErr   error
 	deletePathCalls []string
 	deletePathErr   error
@@ -222,12 +225,12 @@ func TestServiceCreate(t *testing.T) {
 	svc := &service{repo: repo, act: act, snap: &mockSnapshotter{}}
 
 	err := svc.Create(context.Background(), &model.Camera{
-		Name:     "new-cam",
-		IP:       "192.168.1.100",
-		Port:     554,
-		Protocol: "RTSP",
+		Name:      "new-cam",
+		IP:        "192.168.1.100",
+		Port:      554,
+		Protocol:  "RTSP",
 		StreamURL: "rtsp://192.168.1.100/stream",
-		Password: "secret123",
+		Password:  "secret123",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

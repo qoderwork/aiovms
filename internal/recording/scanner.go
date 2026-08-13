@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,8 +23,13 @@ type CameraLookup interface {
 	FindByMediaMTXPath(path string) (*model.Camera, error)
 }
 
-// Scanner periodically scans the recording directory for new/updated fMP4 files,
-// extracts metadata via mediaprobe, and upserts into the database.
+// Scanner ingests recorded fMP4 segments: probe metadata, then upsert into
+// the database. It serves two roles:
+//
+//  1. Fallback reconciler — periodically walks the recording directory so
+//     segments are ingested even when the segment-complete hook is lost.
+//  2. Shared ingestion path — the hook handler calls IngestFile directly for
+//     immediate (fast-path) ingestion of completed segments.
 type Scanner struct {
 	svc        Service
 	camLookup  CameraLookup
@@ -33,13 +39,17 @@ type Scanner struct {
 	stopOnce   sync.Once
 }
 
-// NewScanner creates a recording file scanner.
-func NewScanner(svc Service, recordPath string, camLookup CameraLookup) *Scanner {
+// NewScanner creates a recording file scanner. interval is the fallback scan
+// period; <= 0 defaults to 30s.
+func NewScanner(svc Service, recordPath string, camLookup CameraLookup, interval time.Duration) *Scanner {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
 	return &Scanner{
 		svc:        svc,
 		camLookup:  camLookup,
 		recordPath: recordPath,
-		interval:   30 * time.Second,
+		interval:   interval,
 		stopCh:     make(chan struct{}),
 	}
 }
@@ -90,24 +100,10 @@ func (s *Scanner) scan() {
 			return nil
 		}
 
-		// Parent directory is the MediaMTX path name (e.g. "cam-a1b2c3d4").
-		// Resolve it to the full camera UUID via DB lookup.
-		mtxPath := filepath.Base(filepath.Dir(path))
-		cam, err := s.camLookup.FindByMediaMTXPath(mtxPath)
-		if err != nil {
-			logger.Warnf("scanner: no camera found for path %q (file %s), skipping", mtxPath, path)
-			return nil
-		}
-
-		rec, err := s.probeAndCreate(path, cam, mtxPath, info)
-		if err != nil {
-			logger.Debugf("scanner: probe %s: %v", path, err)
-			return nil
-		}
-
-		if rec != nil {
-			// Background context for upsert (not request-scoped)
-			_ = s.svc.Upsert(context.Background(), rec)
+		// Fallback path: status is heuristic (unknown completion), so pass
+		// knownComplete=false.
+		if err := s.ingest(path, info, false); err != nil {
+			logger.Debugf("scanner: %v", err)
 		}
 		return nil
 	})
@@ -117,7 +113,44 @@ func (s *Scanner) scan() {
 	}
 }
 
-func (s *Scanner) probeAndCreate(path string, cam *model.Camera, mtxPath string, info os.FileInfo) (*model.Recording, error) {
+// IngestFile probes a single segment file and upserts it into the database.
+// Shared by the segment-complete hook (fast path, knownComplete=true) and the
+// scanner fallback. Idempotent — repeated calls converge via the file_path
+// upsert, so hook and scanner may both ingest the same file safely.
+func (s *Scanner) IngestFile(path string, knownComplete bool) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat segment: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("segment path is a directory: %s", path)
+	}
+	if !strings.HasSuffix(strings.ToLower(info.Name()), ".mp4") {
+		return fmt.Errorf("not an mp4 segment: %s", path)
+	}
+	return s.ingest(path, info, knownComplete)
+}
+
+// ingest resolves the owning camera, probes the file, and upserts the record.
+func (s *Scanner) ingest(path string, info os.FileInfo, knownComplete bool) error {
+	// Parent directory is the MediaMTX path name (e.g. "cam-a1b2c3d4").
+	// Resolve it to the full camera UUID via DB lookup.
+	mtxPath := filepath.Base(filepath.Dir(path))
+	cam, err := s.camLookup.FindByMediaMTXPath(mtxPath)
+	if err != nil {
+		return fmt.Errorf("no camera found for path %q (file %s)", mtxPath, path)
+	}
+
+	rec, err := s.probeAndCreate(path, cam, mtxPath, info, knownComplete)
+	if err != nil {
+		return fmt.Errorf("probe %s: %w", path, err)
+	}
+
+	// Background context for upsert (not request-scoped)
+	return s.svc.Upsert(context.Background(), rec)
+}
+
+func (s *Scanner) probeAndCreate(path string, cam *model.Camera, mtxPath string, info os.FileInfo, knownComplete bool) (*model.Recording, error) {
 	mi, err := mediaprobe.ProbeMP4(path)
 	if err != nil {
 		return nil, err
@@ -132,8 +165,12 @@ func (s *Scanner) probeAndCreate(path string, cam *model.Camera, mtxPath string,
 	}
 
 	endTime := startTime.Add(time.Duration(mi.Duration * float64(time.Second)))
+	// Hook callers know the segment is finalized; scanner callers rely on the
+	// mtime heuristic. (A scanner pass shortly after the hook may briefly flip
+	// status back to "recording" — the next pass settles it; retention only
+	// deletes "complete" rows, so this window is harmless.)
 	status := "complete"
-	if time.Since(info.ModTime()) < 2*time.Minute {
+	if !knownComplete && time.Since(info.ModTime()) < 2*time.Minute {
 		status = "recording"
 	}
 

@@ -61,11 +61,12 @@ func (c *Client) AddPath(name string, cfg PathConfig) error {
 	// 400 — most likely "path already exists". Converge by patching the
 	// full desired config (patch is idempotent).
 	if perr := c.PatchPath(name, map[string]any{
-		"source":                cfg.Source,
-		"sourceOnDemand":        cfg.SourceOnDemand,
-		"record":                cfg.Record,
-		"recordPath":            cfg.RecordPath,
-		"recordSegmentDuration": cfg.RecordSegmentDuration,
+		"source":                     cfg.Source,
+		"sourceOnDemand":             cfg.SourceOnDemand,
+		"record":                     cfg.Record,
+		"recordPath":                 cfg.RecordPath,
+		"recordSegmentDuration":      cfg.RecordSegmentDuration,
+		"runOnRecordSegmentComplete": cfg.RunOnRecordSegmentComplete,
 	}); perr != nil {
 		return fmt.Errorf("add path %s failed (%v) and patch fallback failed: %w", name, err, perr)
 	}
@@ -260,15 +261,34 @@ type PathConfig struct {
 	Record                bool   `json:"record,omitempty"`
 	RecordPath            string `json:"recordPath,omitempty"`
 	RecordSegmentDuration string `json:"recordSegmentDuration,omitempty"`
+	// RunOnRecordSegmentComplete fires when a recording segment is finalized.
+	// Used to push segment-complete events back to aiovms (fast path); the
+	// disk scanner remains the reconciliation fallback.
+	RunOnRecordSegmentComplete string `json:"runOnRecordSegmentComplete,omitempty"`
+}
+
+// SegmentCompleteHookCommand builds the runOnRecordSegmentComplete hook that
+// POSTs the completed segment back to aiovms. It uses busybox wget (present
+// in the mediamtx-ffmpeg image); failures are non-fatal ("|| true") because
+// the scanner reconciles missed events on its own schedule.
+// baseURL empty → hook disabled (returns "").
+func SegmentCompleteHookCommand(baseURL string) string {
+	if baseURL == "" {
+		return ""
+	}
+	return "wget -q -O /dev/null --header='Content-Type: application/json' " +
+		"--post-data='{\"path\":\"$MTX_PATH\",\"segment_path\":\"$MTX_RECORD_SEGMENT_PATH\"}' " +
+		baseURL + "/internal/segments/complete || true"
 }
 
 // PathConfigItem is returned by ListPathConfigs. It includes the record
 // configuration which is absent from the runtime PathInfo.
 type PathConfigItem struct {
-	Name           string `json:"name"`
-	Source         string `json:"source"`
-	SourceOnDemand bool   `json:"sourceOnDemand"`
-	Record         bool   `json:"record"`
+	Name                       string `json:"name"`
+	Source                     string `json:"source"`
+	SourceOnDemand             bool   `json:"sourceOnDemand"`
+	Record                     bool   `json:"record"`
+	RunOnRecordSegmentComplete string `json:"runOnRecordSegmentComplete"`
 }
 
 // PathInfo is returned by ListPaths (runtime state).

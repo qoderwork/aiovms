@@ -23,37 +23,37 @@ type Handler struct {
 // resolution, fps, password_enc) are explicitly excluded so that
 // JSON binding cannot inject them.
 type CreateCameraRequest struct {
-	Name          string   `json:"name"`
-	IP            string   `json:"ip"`
-	Port          int      `json:"port"`
-	Protocol      string   `json:"protocol"` // RTSP / ONVIF
-	Username      string   `json:"username"`
-	Password      string   `json:"password,omitempty"`
-	StreamURL     string   `json:"stream_url"`
-	SubStreamURL  string   `json:"sub_stream_url"`
-	Manufacturer  string   `json:"manufacturer"`
-	Model         string   `json:"model"`
-	SiteID        *string  `json:"site_id"`
-	Latitude      *float64 `json:"latitude"`
-	Longitude     *float64 `json:"longitude"`
+	Name         string   `json:"name"`
+	IP           string   `json:"ip"`
+	Port         int      `json:"port"`
+	Protocol     string   `json:"protocol"` // RTSP / ONVIF
+	Username     string   `json:"username"`
+	Password     string   `json:"password,omitempty"`
+	StreamURL    string   `json:"stream_url"`
+	SubStreamURL string   `json:"sub_stream_url"`
+	Manufacturer string   `json:"manufacturer"`
+	Model        string   `json:"model"`
+	SiteID       *string  `json:"site_id"`
+	Latitude     *float64 `json:"latitude"`
+	Longitude    *float64 `json:"longitude"`
 }
 
 // UpdateCameraRequest is the DTO for updating an existing camera.
 // Same field restrictions as CreateCameraRequest.
 type UpdateCameraRequest struct {
-	Name          string   `json:"name"`
-	IP            string   `json:"ip"`
-	Port          int      `json:"port"`
-	Protocol      string   `json:"protocol"`
-	Username      string   `json:"username"`
-	Password      string   `json:"password,omitempty"`
-	StreamURL     string   `json:"stream_url"`
-	SubStreamURL  string   `json:"sub_stream_url"`
-	Manufacturer  string   `json:"manufacturer"`
-	Model         string   `json:"model"`
-	SiteID        *string  `json:"site_id"`
-	Latitude      *float64 `json:"latitude"`
-	Longitude     *float64 `json:"longitude"`
+	Name         string   `json:"name"`
+	IP           string   `json:"ip"`
+	Port         int      `json:"port"`
+	Protocol     string   `json:"protocol"`
+	Username     string   `json:"username"`
+	Password     string   `json:"password,omitempty"`
+	StreamURL    string   `json:"stream_url"`
+	SubStreamURL string   `json:"sub_stream_url"`
+	Manufacturer string   `json:"manufacturer"`
+	Model        string   `json:"model"`
+	SiteID       *string  `json:"site_id"`
+	Latitude     *float64 `json:"latitude"`
+	Longitude    *float64 `json:"longitude"`
 }
 
 // toCamera copies DTO fields into a model.Camera, leaving system-managed
@@ -449,11 +449,11 @@ func (h *Handler) ProbeONVIF(c *gin.Context) {
 // @Router /cameras/scan [post]
 func (h *Handler) ScanONVIF(c *gin.Context) {
 	var req struct {
-		CIDR      string `json:"cidr" binding:"required"`
-		Port      int    `json:"port"`
-		Username  string `json:"username"`
-		Password  string `json:"password"`
-		TimeoutSec int   `json:"timeout_sec"`
+		CIDR       string `json:"cidr" binding:"required"`
+		Port       int    `json:"port"`
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		TimeoutSec int    `json:"timeout_sec"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.Error(c, http.StatusBadRequest, "cidr is required (e.g. 172.16.2.0/24)")

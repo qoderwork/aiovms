@@ -3,8 +3,29 @@ package mediamtx
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+// TestSegmentCompleteHookCommand verifies the hook command builder: empty
+// base URL disables the hook; otherwise the command posts the segment info
+// to the aiovms internal endpoint.
+func TestSegmentCompleteHookCommand(t *testing.T) {
+	if got := SegmentCompleteHookCommand(""); got != "" {
+		t.Errorf("empty base URL must disable the hook, got %q", got)
+	}
+	got := SegmentCompleteHookCommand("http://aiovms:8081")
+	for _, want := range []string{
+		"http://aiovms:8081/internal/segments/complete",
+		"$MTX_PATH",
+		"$MTX_RECORD_SEGMENT_PATH",
+		"|| true",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("hook command missing %q: %s", want, got)
+		}
+	}
+}
 
 // TestAddPathUpsert verifies the upsert semantics: when the path already
 // exists (MediaMTX answers 400 to add), AddPath falls back to patching the

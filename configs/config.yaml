@@ -21,6 +21,12 @@ recording:
   disk_watermark: 80
   # MediaMTX 录像分片时长，显式下发给 cam-* 路径（不依赖 all_others 继承）
   segment_duration: "1m"
+  # 分片完成回调（快路径）：MediaMTX 写完分片后 POST 回 aiovms 立即入库。
+  # 该地址必须是从 mediamtx 容器视角可达的 aiovms 地址（compose 服务名）。
+  # 留空则禁用 hook，仅靠磁盘扫描兜底。
+  hook_base_url: "http://aiovms:8081"
+  # 磁盘扫描间隔（慢路径兜底）。hook 启用后可放宽到 5 分钟。
+  scan_interval_sec: 300
 
 logger:
   filename: "logs/aiovms.log"

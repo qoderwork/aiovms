@@ -28,8 +28,8 @@ import (
 	"aiovms/internal/schedule"
 	"aiovms/pkg/crypto"
 	"aiovms/pkg/database"
-	_ "aiovms/pkg/metrics" // register prometheus metrics
 	"aiovms/pkg/logger"
+	_ "aiovms/pkg/metrics" // register prometheus metrics
 )
 
 // @title AIO VMS API
@@ -112,9 +112,13 @@ func main() {
 	//    serially with retries, so MTX state always converges to DB intent.
 	actuator := controller.NewActuator(mtxClient)
 
+	// 7b. Segment-complete hook command pushed to cam-* paths (empty when
+	//     recording.hook_base_url is unset → scanner-only mode).
+	hookCommand := mediamtx.SegmentCompleteHookCommand(cfg.Recording.HookBaseURL)
+
 	// 8. Bootstrap layers
 	camRepo := camera.NewRepository(db)
-	cameraSvc := camera.NewService(camRepo, actuator, mtxClient, cfg.Recording.Path, cfg.Recording.SegmentDuration)
+	cameraSvc := camera.NewService(camRepo, actuator, mtxClient, cfg.Recording.Path, cfg.Recording.SegmentDuration, hookCommand)
 
 	recRepo := recording.NewRepository(db)
 	recSvc := recording.NewService(recRepo, cameraSvc, actuator)
@@ -125,7 +129,7 @@ func main() {
 	// 9. Start unified reconciler (replaces startup sync, cron triggerJob,
 	//    event-driven MTX recovery, and camera status checker).
 	reconciler := controller.NewReconciler(camRepo, schRepo, recRepo, mtxClient, actuator,
-		cfg.Recording.Path, cfg.Recording.SegmentDuration)
+		cfg.Recording.Path, cfg.Recording.SegmentDuration, hookCommand)
 
 	// 10. Start background workers
 	var wg sync.WaitGroup
@@ -136,7 +140,8 @@ func main() {
 	wg.Add(1)
 	go func() { defer wg.Done(); reconciler.Run() }()
 
-	recScanner := recording.NewScanner(recSvc, cfg.Recording.Path, camRepo)
+	recScanner := recording.NewScanner(recSvc, cfg.Recording.Path, camRepo,
+		time.Duration(cfg.Recording.ScanIntervalSec)*time.Second)
 	wg.Add(1)
 	go func() { defer wg.Done(); recScanner.Run() }()
 
@@ -192,6 +197,12 @@ func main() {
 
 	// Swagger API documentation
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// MediaMTX segment-complete hook (fast ingestion path). Registered
+	// OUTSIDE the tenant middleware: MediaMTX sends no tenant headers; the
+	// tenant is derived from the camera owning the path.
+	router.POST("/internal/segments/complete",
+		recording.NewHookHandler(recScanner).HandleSegmentComplete)
 
 	// Prometheus metrics（公开端点，无需租户头）
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))

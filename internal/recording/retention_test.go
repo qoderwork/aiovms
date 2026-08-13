@@ -15,9 +15,9 @@ type mockRepoForRetention struct {
 	deletedPaths []string
 }
 
-func (m *mockRepoForRetention) Create(rec *model.Recording) error          { return nil }
-func (m *mockRepoForRetention) Update(rec *model.Recording) error          { return nil }
-func (m *mockRepoForRetention) Upsert(rec *model.Recording) error          { return nil }
+func (m *mockRepoForRetention) Create(rec *model.Recording) error            { return nil }
+func (m *mockRepoForRetention) Update(rec *model.Recording) error            { return nil }
+func (m *mockRepoForRetention) Upsert(rec *model.Recording) error            { return nil }
 func (m *mockRepoForRetention) FindByID(id string) (*model.Recording, error) { return nil, nil }
 func (m *mockRepoForRetention) FindByIDAndTenant(id string, tenantID int64) (*model.Recording, error) {
 	return nil, nil
@@ -82,15 +82,17 @@ func (m *mockRepoForRetention) FindAllSortedByTime() ([]model.Recording, error) 
 }
 
 // Session methods are not exercised by retention tests; stub them to satisfy Repository.
-func (m *mockRepoForRetention) CreateSession(sess *model.RecordingSession) error                  { return nil }
-func (m *mockRepoForRetention) FindActiveSessions() ([]model.RecordingSession, error)             { return nil, nil }
+func (m *mockRepoForRetention) CreateSession(sess *model.RecordingSession) error { return nil }
+func (m *mockRepoForRetention) FindActiveSessions() ([]model.RecordingSession, error) {
+	return nil, nil
+}
 func (m *mockRepoForRetention) FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error) {
 	return nil, nil
 }
 func (m *mockRepoForRetention) FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error) {
 	return nil, nil
 }
-func (m *mockRepoForRetention) CloseSession(id string, endTime time.Time) error                   { return nil }
+func (m *mockRepoForRetention) CloseSession(id string, endTime time.Time) error { return nil }
 func (m *mockRepoForRetention) FindSessionByCameraAndTime(cameraID string, t time.Time) (*model.RecordingSession, error) {
 	return nil, nil
 }

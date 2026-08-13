@@ -22,7 +22,7 @@ type CreateScheduleRequest struct {
 	CameraID   string `json:"camera_id" binding:"required"`
 	Name       string `json:"name"`
 	Enabled    bool   `json:"enabled"`
-	Weekdays   string `json:"weekdays"`   // "1,2,3,4,5" (Sun=0)
+	Weekdays   string `json:"weekdays"`    // "1,2,3,4,5" (Sun=0)
 	StreamType string `json:"stream_type"` // main / sub — 一期预留，暂不生效，录像始终用主码流
 	StartTime  string `json:"start_time"`  // "08:00"
 	EndTime    string `json:"end_time"`    // "20:00"
