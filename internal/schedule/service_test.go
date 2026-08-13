@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"aiovms/internal/model"
+	"aiovms/pkg/apperror"
 )
 
 func TestValidateTimeRange(t *testing.T) {
@@ -86,6 +87,16 @@ func (m *mockRepo) FindByID(id string) (*model.RecordSchedule, error) {
 	}
 	return s, nil
 }
+func (m *mockRepo) FindByIDAndTenant(id string, tenantID int64) (*model.RecordSchedule, error) {
+	if m.findByIDErr != nil {
+		return nil, m.findByIDErr
+	}
+	s, ok := m.schedules[id]
+	if !ok || s.LicenseID != tenantID {
+		return nil, errors.New("not found")
+	}
+	return s, nil
+}
 func (m *mockRepo) Delete(id string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
@@ -110,7 +121,7 @@ func TestScheduleGet(t *testing.T) {
 		ID: "s1", Name: "mon-fri", Enabled: true,
 	}
 
-	sch, err := svc.Get(context.Background(), "s1")
+	sch, err := svc.Get(context.Background(), 0, "s1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -121,9 +132,24 @@ func TestScheduleGet(t *testing.T) {
 
 func TestScheduleGetNotFound(t *testing.T) {
 	svc, _ := newTestService()
-	_, err := svc.Get(context.Background(), "no-such-id")
+	_, err := svc.Get(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestScheduleGetCrossTenantForbidden verifies that reading another tenant's
+// schedule returns 403 (design doc: 越权返回 403).
+func TestScheduleGetCrossTenantForbidden(t *testing.T) {
+	svc, repo := newTestService()
+	repo.schedules["s1"] = &model.RecordSchedule{ID: "s1", Name: "other", LicenseID: 100}
+	_, err := svc.Get(context.Background(), 200, "s1")
+	if err == nil {
+		t.Fatal("expected forbidden error, got nil")
+	}
+	appErr, ok := err.(*apperror.AppError)
+	if !ok || appErr.StatusCode != 403 {
+		t.Errorf("expected 403 AppError, got %v", err)
 	}
 }
 
@@ -170,7 +196,7 @@ func TestScheduleUpdate(t *testing.T) {
 		ID: "s1", Name: "old", StartTime: "00:00", EndTime: "23:59",
 	}
 
-	err := svc.Update(context.Background(), "s1", &model.RecordSchedule{
+	err := svc.Update(context.Background(), 0, "s1", &model.RecordSchedule{
 		Name:      "new-name",
 		Enabled:   false,
 		StartTime: "09:00",
@@ -189,7 +215,7 @@ func TestScheduleUpdate(t *testing.T) {
 
 func TestScheduleUpdateNotFound(t *testing.T) {
 	svc, _ := newTestService()
-	err := svc.Update(context.Background(), "no-such-id", &model.RecordSchedule{
+	err := svc.Update(context.Background(), 0, "no-such-id", &model.RecordSchedule{
 		Name: "x", StartTime: "00:00", EndTime: "23:59",
 	})
 	if err == nil {
@@ -197,11 +223,29 @@ func TestScheduleUpdateNotFound(t *testing.T) {
 	}
 }
 
+// TestScheduleUpdateCrossTenantForbidden verifies that updating another
+// tenant's schedule returns 403 and leaves it unchanged.
+func TestScheduleUpdateCrossTenantForbidden(t *testing.T) {
+	svc, repo := newTestService()
+	repo.schedules["s1"] = &model.RecordSchedule{
+		ID: "s1", Name: "other", LicenseID: 100, StartTime: "00:00", EndTime: "23:59",
+	}
+	err := svc.Update(context.Background(), 200, "s1", &model.RecordSchedule{
+		Name: "hacked", StartTime: "09:00", EndTime: "18:00",
+	})
+	if err == nil {
+		t.Fatal("expected forbidden error, got nil")
+	}
+	if repo.schedules["s1"].Name != "other" {
+		t.Errorf("schedule was modified across tenants: name = %q", repo.schedules["s1"].Name)
+	}
+}
+
 func TestScheduleDelete(t *testing.T) {
 	svc, repo := newTestService()
 	repo.schedules["s1"] = &model.RecordSchedule{ID: "s1"}
 
-	err := svc.Delete(context.Background(), "s1")
+	err := svc.Delete(context.Background(), 0, "s1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -212,9 +256,23 @@ func TestScheduleDelete(t *testing.T) {
 
 func TestScheduleDeleteNotFound(t *testing.T) {
 	svc, _ := newTestService()
-	err := svc.Delete(context.Background(), "no-such-id")
+	err := svc.Delete(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestScheduleDeleteCrossTenantForbidden verifies that deleting another
+// tenant's schedule returns 403 and leaves it intact.
+func TestScheduleDeleteCrossTenantForbidden(t *testing.T) {
+	svc, repo := newTestService()
+	repo.schedules["s1"] = &model.RecordSchedule{ID: "s1", LicenseID: 100}
+	err := svc.Delete(context.Background(), 200, "s1")
+	if err == nil {
+		t.Fatal("expected forbidden error, got nil")
+	}
+	if _, exists := repo.schedules["s1"]; !exists {
+		t.Error("schedule was deleted across tenants")
 	}
 }
 
@@ -224,7 +282,7 @@ func TestScheduleToggle(t *testing.T) {
 		ID: "s1", Name: "test", Enabled: true,
 	}
 
-	sch, err := svc.Toggle(context.Background(), "s1")
+	sch, err := svc.Toggle(context.Background(), 0, "s1")
 	if err != nil {
 		t.Fatalf("Toggle: %v", err)
 	}
@@ -233,7 +291,7 @@ func TestScheduleToggle(t *testing.T) {
 	}
 
 	// toggle back
-	sch, err = svc.Toggle(context.Background(), "s1")
+	sch, err = svc.Toggle(context.Background(), 0, "s1")
 	if err != nil {
 		t.Fatalf("Toggle again: %v", err)
 	}
@@ -244,9 +302,23 @@ func TestScheduleToggle(t *testing.T) {
 
 func TestScheduleToggleNotFound(t *testing.T) {
 	svc, _ := newTestService()
-	_, err := svc.Toggle(context.Background(), "no-such-id")
+	_, err := svc.Toggle(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestScheduleToggleCrossTenantForbidden verifies that toggling another
+// tenant's schedule returns 403 and leaves it unchanged.
+func TestScheduleToggleCrossTenantForbidden(t *testing.T) {
+	svc, repo := newTestService()
+	repo.schedules["s1"] = &model.RecordSchedule{ID: "s1", LicenseID: 100, Enabled: true}
+	_, err := svc.Toggle(context.Background(), 200, "s1")
+	if err == nil {
+		t.Fatal("expected forbidden error, got nil")
+	}
+	if !repo.schedules["s1"].Enabled {
+		t.Error("schedule was toggled across tenants")
 	}
 }
 

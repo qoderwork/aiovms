@@ -63,7 +63,8 @@ func (h *Handler) List(c *gin.Context) {
 // @Security UserHeader
 // @Router /recordings/{id} [get]
 func (h *Handler) Get(c *gin.Context) {
-	rec, url, err := h.svc.Get(c.Request.Context(), c.Param("id"))
+	tenantID := int64(middleware.GetTenantID(c))
+	rec, url, err := h.svc.Get(c.Request.Context(), tenantID, c.Param("id"))
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -84,12 +85,13 @@ func (h *Handler) Get(c *gin.Context) {
 // @Router /recordings/{id} [delete]
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
+	tenantID := int64(middleware.GetTenantID(c))
 	// Fetch before delete to capture detail for audit.
-	if rec, _, err := h.svc.Get(c.Request.Context(), id); err == nil {
+	if rec, _, err := h.svc.Get(c.Request.Context(), tenantID, id); err == nil {
 		audit.Write(middleware.GetUserID(c), "recording.delete", "recording", id,
 			rec.Filename+" / camera:"+rec.CameraID, rec.LicenseID)
 	}
-	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), tenantID, id); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
@@ -114,12 +116,13 @@ func (h *Handler) StartManual(c *gin.Context) {
 		utils.Error(c, http.StatusBadRequest, "camera id required")
 		return
 	}
-	if err := h.svc.StartManual(c.Request.Context(), cameraID); err != nil {
+	tenantID := int64(middleware.GetTenantID(c))
+	if err := h.svc.StartManual(c.Request.Context(), tenantID, cameraID); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
 	audit.Write(middleware.GetUserID(c), "recording.start_manual", "camera", cameraID,
-		"manual recording started", int64(middleware.GetTenantID(c)))
+		"manual recording started", tenantID)
 	utils.Success(c, nil)
 }
 
@@ -141,11 +144,12 @@ func (h *Handler) StopManual(c *gin.Context) {
 		utils.Error(c, http.StatusBadRequest, "camera id required")
 		return
 	}
-	if err := h.svc.StopManual(c.Request.Context(), cameraID); err != nil {
+	tenantID := int64(middleware.GetTenantID(c))
+	if err := h.svc.StopManual(c.Request.Context(), tenantID, cameraID); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
 	audit.Write(middleware.GetUserID(c), "recording.stop_manual", "camera", cameraID,
-		"manual recording stopped", int64(middleware.GetTenantID(c)))
+		"manual recording stopped", tenantID)
 	utils.Success(c, nil)
 }

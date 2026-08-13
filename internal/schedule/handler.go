@@ -144,13 +144,14 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 	id := c.Param("id")
+	tenantID := int64(middleware.GetTenantID(c))
 	sch := req.toRecordSchedule()
-	if err := h.svc.Update(c.Request.Context(), id, &sch); err != nil {
+	if err := h.svc.Update(c.Request.Context(), tenantID, id, &sch); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
 	audit.Write(middleware.GetUserID(c), "schedule.update", "schedule", id,
-		sch.Name+" / camera:"+sch.CameraID, int64(middleware.GetTenantID(c)))
+		sch.Name+" / camera:"+sch.CameraID, tenantID)
 	utils.Success(c, nil)
 }
 
@@ -167,12 +168,13 @@ func (h *Handler) Update(c *gin.Context) {
 // @Router /schedules/{id} [delete]
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
+	tenantID := int64(middleware.GetTenantID(c))
 	// Fetch before delete to capture detail for audit.
-	if sch, err := h.svc.Get(c.Request.Context(), id); err == nil {
+	if sch, err := h.svc.Get(c.Request.Context(), tenantID, id); err == nil {
 		audit.Write(middleware.GetUserID(c), "schedule.delete", "schedule", id,
 			sch.Name+" / camera:"+sch.CameraID, sch.LicenseID)
 	}
-	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), tenantID, id); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
@@ -191,7 +193,8 @@ func (h *Handler) Delete(c *gin.Context) {
 // @Security UserHeader
 // @Router /schedules/{id}/toggle [patch]
 func (h *Handler) Toggle(c *gin.Context) {
-	sch, err := h.svc.Toggle(c.Request.Context(), c.Param("id"))
+	tenantID := int64(middleware.GetTenantID(c))
+	sch, err := h.svc.Toggle(c.Request.Context(), tenantID, c.Param("id"))
 	if err != nil {
 		utils.HandleError(c, err)
 		return

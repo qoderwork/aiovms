@@ -16,10 +16,10 @@ import (
 
 type Service interface {
 	List(ctx context.Context, tenantID int64, cameraID, startTime, endTime string, page, pageSize int) ([]model.Recording, int64, error)
-	Get(ctx context.Context, id string) (*model.Recording, string, error)
-	Delete(ctx context.Context, id string) error
-	StartManual(ctx context.Context, cameraID string) error
-	StopManual(ctx context.Context, cameraID string) error
+	Get(ctx context.Context, tenantID int64, id string) (*model.Recording, string, error)
+	Delete(ctx context.Context, tenantID int64, id string) error
+	StartManual(ctx context.Context, tenantID int64, cameraID string) error
+	StopManual(ctx context.Context, tenantID int64, cameraID string) error
 	Upsert(ctx context.Context, rec *model.Recording) error
 }
 
@@ -35,7 +35,7 @@ type service struct {
 }
 
 type CameraService interface {
-	Get(ctx context.Context, id string) (*model.Camera, error)
+	Get(ctx context.Context, tenantID int64, id string) (*model.Camera, error)
 }
 
 func NewService(repo Repository, camSvc CameraService, mtx *mediamtx.Client) Service {
@@ -50,10 +50,24 @@ func (s *service) List(ctx context.Context, tenantID int64, cameraID, startTime,
 	return s.repo.FindAll(tenantID, cameraID, startTime, endTime, offset, pageSize)
 }
 
-func (s *service) Get(ctx context.Context, id string) (*model.Recording, string, error) {
-	rec, err := s.repo.FindByID(id)
+// getForTenant loads a recording and enforces tenant isolation.
+// Returns ErrRecordingNotFound when absent, ErrForbidden when it belongs to
+// another tenant (design doc: 越权返回 403).
+func (s *service) getForTenant(tenantID int64, id string) (*model.Recording, error) {
+	rec, err := s.repo.FindByIDAndTenant(id, tenantID)
+	if err == nil {
+		return rec, nil
+	}
+	if _, err := s.repo.FindByID(id); err == nil {
+		return nil, apperror.ErrForbidden.WithMessage("recording belongs to another tenant")
+	}
+	return nil, apperror.ErrRecordingNotFound
+}
+
+func (s *service) Get(ctx context.Context, tenantID int64, id string) (*model.Recording, string, error) {
+	rec, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return nil, "", apperror.ErrRecordingNotFound
+		return nil, "", err
 	}
 	// Playback URL served by Nginx from /recordings/ path.
 	// Uses MediaMTXPath (e.g. "cam-a1b2c3d4") which matches the physical directory
@@ -62,10 +76,10 @@ func (s *service) Get(ctx context.Context, id string) (*model.Recording, string,
 	return rec, playURL, nil
 }
 
-func (s *service) Delete(ctx context.Context, id string) error {
-	rec, err := s.repo.FindByID(id)
+func (s *service) Delete(ctx context.Context, tenantID int64, id string) error {
+	rec, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return apperror.ErrRecordingNotFound
+		return err
 	}
 	// Delete DB record first. If it succeeds but os.Remove fails, the file
 	// will be re-discovered by the scanner on the next cycle and Upserted back.
@@ -82,10 +96,10 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *service) StartManual(ctx context.Context, cameraID string) error {
-	cam, err := s.camSvc.Get(ctx, cameraID)
+func (s *service) StartManual(ctx context.Context, tenantID int64, cameraID string) error {
+	cam, err := s.camSvc.Get(ctx, tenantID, cameraID)
 	if err != nil {
-		return apperror.ErrCameraNotFound
+		return err
 	}
 
 	// Close any pre-existing active session for this camera (defensive: should not happen
@@ -128,30 +142,36 @@ func (s *service) StartManual(ctx context.Context, cameraID string) error {
 	return nil
 }
 
-func (s *service) StopManual(ctx context.Context, cameraID string) error {
-	cam, err := s.camSvc.Get(ctx, cameraID)
+func (s *service) StopManual(ctx context.Context, tenantID int64, cameraID string) error {
+	cam, err := s.camSvc.Get(ctx, tenantID, cameraID)
 	if err != nil {
-		return apperror.ErrCameraNotFound
+		return err
 	}
 
-	// 1. Stop MediaMTX recording first (idempotent: safe even if not recording).
+	// 1. Close the active session FIRST. The session is the source of truth for
+	//    desired recording state: while it is open, the reconciler's drift recovery
+	//    re-applies record:true every cycle. Closing it before stopping MediaMTX
+	//    removes the window where Stop patches record:false but the reconciler
+	//    immediately flips it back to true (stop silently undone).
+	sess, sessErr := s.repo.FindActiveSessionByCamera(cameraID)
+	if sessErr == nil && sess != nil {
+		if err := s.repo.CloseSession(sess.ID, time.Now()); err != nil {
+			logger.Errorf("stop manual: close session %s for camera %s: %v", sess.ID, cameraID, err)
+			return apperror.Wrap(err, 50000, 500, "failed to close recording session")
+		}
+	}
+	// No active session — MediaMTX may still be recording (e.g. previous stop
+	// crashed after closing the session); fall through to patch anyway (idempotent).
+
+	// 2. Stop MediaMTX recording (idempotent: safe even if not recording).
 	//    恢复 sourceOnDemand=true，无人预览时停止拉流节省资源。
 	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
 		"record":         false,
 		"sourceOnDemand": true,
 	}); err != nil {
+		// Session already closed. If the patch fails, the reconciler's orphan-record
+		// repair will stop recording on a later cycle, so no retry loop is needed here.
 		return err
-	}
-
-	// 2. Close active session if exists (set end_time).
-	sess, err := s.repo.FindActiveSessionByCamera(cameraID)
-	if err != nil {
-		// No active session — nothing to close. Not an error.
-		return nil
-	}
-	if err := s.repo.CloseSession(sess.ID, time.Now()); err != nil {
-		logger.Errorf("stop manual: close session %s for camera %s: %v", sess.ID, cameraID, err)
-		return apperror.Wrap(err, 50000, 500, "failed to close recording session")
 	}
 	return nil
 }

@@ -54,6 +54,13 @@ const (
 	reconcileInterval = 10 * time.Second
 	statusProbeEvery  = 3 // probe camera status every 3 ticks (30s)
 	probeTimeout      = 3 * time.Second
+	// orphanRecordConfirmTicks is the number of consecutive reconcile cycles an
+	// "orphan" recording state (MediaMTX record=true but no active session and
+	// no in-window schedule) must be observed before the reconciler forces it
+	// off. The hysteresis avoids fighting with the brief gap in start flows
+	// where record:true is patched a few milliseconds before the session row
+	// is created.
+	orphanRecordConfirmTicks = 2
 )
 
 // Reconciler is the unified control loop that replaces the former 3 separate
@@ -77,8 +84,12 @@ type Reconciler struct {
 
 	mtxDown      bool
 	probeCounter int
-	stopCh       chan struct{}
-	stopOnce     sync.Once
+	// orphanRecordTicks counts consecutive observations of orphan recording
+	// state per MediaMTX path (see orphanRecordConfirmTicks). Accessed only
+	// from the single reconcile loop, so no locking is needed.
+	orphanRecordTicks map[string]int
+	stopCh            chan struct{}
+	stopOnce          sync.Once
 }
 
 func NewReconciler(
@@ -89,13 +100,14 @@ func NewReconciler(
 	recordPath, segmentDuration string,
 ) *Reconciler {
 	return &Reconciler{
-		camRepo:         camRepo,
-		schRepo:         schRepo,
-		recRepo:         recRepo,
-		mtx:             mtx,
-		recordPath:      recordPath,
-		segmentDuration: segmentDuration,
-		stopCh:          make(chan struct{}),
+		camRepo:           camRepo,
+		schRepo:           schRepo,
+		recRepo:           recRepo,
+		mtx:               mtx,
+		recordPath:        recordPath,
+		segmentDuration:   segmentDuration,
+		orphanRecordTicks: make(map[string]int),
+		stopCh:            make(chan struct{}),
 	}
 }
 
@@ -353,7 +365,13 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 			logger.Infof("reconcile recording: started schedule %s camera %s", sch.ID, sch.CameraID)
 
 		case !inWindow && sch.LastAction == "start":
-			// Stop recording (unless manual session is active)
+			// Close the schedule session FIRST: the session is the source of truth
+			// for desired recording state. While it is open, drift recovery (below)
+			// re-applies record:true and would undo the stop patch.
+			if sess, err := r.recRepo.FindActiveSessionBySchedule(sch.ID); err == nil && sess != nil {
+				_ = r.recRepo.CloseSession(sess.ID, now)
+			}
+			// Stop recording (unless a manual session is still active)
 			manualActive := false
 			if sess, err := r.recRepo.FindActiveSessionByCamera(sch.CameraID); err == nil && sess != nil {
 				if sess.TriggerType == "manual" {
@@ -365,9 +383,6 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 					"record":         false,
 					"sourceOnDemand": true,
 				})
-			}
-			if sess, err := r.recRepo.FindActiveSessionBySchedule(sch.ID); err == nil && sess != nil {
-				_ = r.recRepo.CloseSession(sess.ID, now)
 			}
 			sch.LastAction = "stop"
 			_ = r.schRepo.Update(sch)
@@ -413,6 +428,55 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 	}
 	if restored > 0 {
 		logger.Infof("reconcile recording: recovered %d sessions from drift", restored)
+	}
+
+	// --- 3. Stop orphan recordings (reverse-direction repair) ---
+	// Ensure paths with NO active session and NO in-window schedule are not
+	// recording. This completes the stop semantics: StopManual / schedule stop
+	// close the session first and then patch MediaMTX; if that patch fails (or
+	// MediaMTX state drifts for any other reason), this section forces
+	// record:false on a later cycle. Without it, a failed stop patch would
+	// leave the camera recording forever with no session to account for it.
+	//
+	// Hysteresis (orphanRecordConfirmTicks): start flows patch record:true a
+	// few milliseconds before creating the session row; requiring two
+	// consecutive orphan observations guarantees we never stop a recording
+	// that is in the middle of starting.
+	wantRecord := make(map[string]bool, len(sessions)+len(scheduleRecording))
+	for _, sess := range sessions {
+		wantRecord[sess.CameraID] = true
+	}
+	for camID := range scheduleRecording {
+		wantRecord[camID] = true
+	}
+
+	cams, err := r.camRepo.FindAll()
+	if err != nil {
+		logger.Errorf("reconcile recording: fetch cameras for orphan check: %v", err)
+		return
+	}
+	for _, cam := range cams {
+		cfg, exists := mtxConfigs[cam.MediaMTXPath]
+		if !exists || !cfg.Record || wantRecord[cam.ID] {
+			delete(r.orphanRecordTicks, cam.MediaMTXPath)
+			continue
+		}
+		// record=true without any session or schedule wanting it — count it.
+		r.orphanRecordTicks[cam.MediaMTXPath]++
+		if r.orphanRecordTicks[cam.MediaMTXPath] < orphanRecordConfirmTicks {
+			logger.Infof("reconcile recording: orphan recording suspected on %s (observation %d/%d)",
+				cam.MediaMTXPath, r.orphanRecordTicks[cam.MediaMTXPath], orphanRecordConfirmTicks)
+			continue
+		}
+		if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
+			"record":         false,
+			"sourceOnDemand": true,
+		}); err != nil {
+			logger.Errorf("reconcile recording: stop orphan recording on %s: %v", cam.MediaMTXPath, err)
+			continue
+		}
+		delete(r.orphanRecordTicks, cam.MediaMTXPath)
+		logger.Warnf("reconcile recording: stopped orphan recording on %s (no active session or schedule)", cam.MediaMTXPath)
 	}
 }
 

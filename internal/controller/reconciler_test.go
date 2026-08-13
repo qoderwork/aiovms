@@ -592,6 +592,71 @@ func TestReconcileRecording_NoDriftWhenAlreadyRecording(t *testing.T) {
 	}
 }
 
+// TestReconcileRecording_OrphanRecordingStoppedAfterHysteresis verifies the
+// reverse-direction repair: a path that is recording (record=true) without any
+// active session or in-window schedule is stopped after being observed for
+// orphanRecordConfirmTicks consecutive cycles. This is the safety net that
+// completes a stop whose MediaMTX patch failed after the session was closed.
+func TestReconcileRecording_OrphanRecordingStoppedAfterHysteresis(t *testing.T) {
+	r, camRepo, _, _, mtx := newTestReconciler()
+	camRepo.cams = []model.Camera{
+		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
+	}
+	// No sessions, no schedules — but MediaMTX is recording.
+	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+		Name:   "cam-cam-1",
+		Record: true,
+	}
+
+	// First observation: suspected, but not yet acted upon (hysteresis).
+	r.reconcileRecording(mtx.pathConfigs)
+	for _, call := range mtx.patchPathCalls {
+		if call.name == "cam-cam-1" && call.patch["record"] == false {
+			t.Fatal("should not stop orphan recording on first observation")
+		}
+	}
+
+	// Second consecutive observation: force stop.
+	r.reconcileRecording(mtx.pathConfigs)
+	foundStop := false
+	for _, call := range mtx.patchPathCalls {
+		if call.name == "cam-cam-1" {
+			if v, ok := call.patch["record"]; ok && v == false {
+				foundStop = true
+			}
+		}
+	}
+	if !foundStop {
+		t.Error("expected record=false patch for orphan recording after hysteresis")
+	}
+}
+
+// TestReconcileRecording_OrphanNotStoppedWhenSessionActive verifies that a
+// recording backed by an active session is never treated as orphan, no matter
+// how many cycles pass.
+func TestReconcileRecording_OrphanNotStoppedWhenSessionActive(t *testing.T) {
+	r, camRepo, _, recRepo, mtx := newTestReconciler()
+	camRepo.cams = []model.Camera{
+		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
+	}
+	recRepo.activeSessions = []model.RecordingSession{
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
+	}
+	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+		Name:   "cam-cam-1",
+		Record: true,
+	}
+
+	for i := 0; i < 3; i++ {
+		r.reconcileRecording(mtx.pathConfigs)
+	}
+	for _, call := range mtx.patchPathCalls {
+		if call.name == "cam-cam-1" && call.patch["record"] == false {
+			t.Error("must not stop recording that has an active session")
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Tests: reconcile() — top-level orchestration
 // ---------------------------------------------------------------------------

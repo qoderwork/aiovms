@@ -12,11 +12,11 @@ import (
 
 type Service interface {
 	List(ctx context.Context, tenantID int64, cameraID string) ([]model.RecordSchedule, error)
-	Get(ctx context.Context, id string) (*model.RecordSchedule, error)
+	Get(ctx context.Context, tenantID int64, id string) (*model.RecordSchedule, error)
 	Create(ctx context.Context, sch *model.RecordSchedule) error
-	Update(ctx context.Context, id string, sch *model.RecordSchedule) error
-	Delete(ctx context.Context, id string) error
-	Toggle(ctx context.Context, id string) (*model.RecordSchedule, error)
+	Update(ctx context.Context, tenantID int64, id string, sch *model.RecordSchedule) error
+	Delete(ctx context.Context, tenantID int64, id string) error
+	Toggle(ctx context.Context, tenantID int64, id string) (*model.RecordSchedule, error)
 }
 
 type service struct {
@@ -31,12 +31,22 @@ func (s *service) List(ctx context.Context, tenantID int64, cameraID string) ([]
 	return s.repo.FindAll(tenantID, cameraID)
 }
 
-func (s *service) Get(ctx context.Context, id string) (*model.RecordSchedule, error) {
-	sch, err := s.repo.FindByID(id)
-	if err != nil {
-		return nil, apperror.ErrScheduleNotFound
+// getForTenant loads a schedule and enforces tenant isolation.
+// Returns ErrScheduleNotFound when absent, ErrForbidden when it belongs to
+// another tenant (design doc: 越权返回 403).
+func (s *service) getForTenant(tenantID int64, id string) (*model.RecordSchedule, error) {
+	sch, err := s.repo.FindByIDAndTenant(id, tenantID)
+	if err == nil {
+		return sch, nil
 	}
-	return sch, nil
+	if _, err := s.repo.FindByID(id); err == nil {
+		return nil, apperror.ErrForbidden.WithMessage("schedule belongs to another tenant")
+	}
+	return nil, apperror.ErrScheduleNotFound
+}
+
+func (s *service) Get(ctx context.Context, tenantID int64, id string) (*model.RecordSchedule, error) {
+	return s.getForTenant(tenantID, id)
 }
 
 func (s *service) Create(ctx context.Context, sch *model.RecordSchedule) error {
@@ -49,10 +59,10 @@ func (s *service) Create(ctx context.Context, sch *model.RecordSchedule) error {
 	return s.repo.Create(sch)
 }
 
-func (s *service) Update(ctx context.Context, id string, sch *model.RecordSchedule) error {
-	existing, err := s.repo.FindByID(id)
+func (s *service) Update(ctx context.Context, tenantID int64, id string, sch *model.RecordSchedule) error {
+	existing, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return apperror.ErrScheduleNotFound
+		return err
 	}
 	if err := validateTimeRange(sch.StartTime, sch.EndTime); err != nil {
 		return err
@@ -67,18 +77,17 @@ func (s *service) Update(ctx context.Context, id string, sch *model.RecordSchedu
 	return s.repo.Update(existing)
 }
 
-func (s *service) Delete(ctx context.Context, id string) error {
-	_, err := s.repo.FindByID(id)
-	if err != nil {
-		return apperror.ErrScheduleNotFound
+func (s *service) Delete(ctx context.Context, tenantID int64, id string) error {
+	if _, err := s.getForTenant(tenantID, id); err != nil {
+		return err
 	}
 	return s.repo.Delete(id)
 }
 
-func (s *service) Toggle(ctx context.Context, id string) (*model.RecordSchedule, error) {
-	existing, err := s.repo.FindByID(id)
+func (s *service) Toggle(ctx context.Context, tenantID int64, id string) (*model.RecordSchedule, error) {
+	existing, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return nil, apperror.ErrScheduleNotFound
+		return nil, err
 	}
 	existing.Enabled = !existing.Enabled
 	existing.UpdatedAt = time.Now()

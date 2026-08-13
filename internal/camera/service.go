@@ -21,17 +21,17 @@ import (
 type Service interface {
 	List(ctx context.Context, tenantID int64, query string, page, pageSize int) ([]model.Camera, int64, error)
 	Create(ctx context.Context, cam *model.Camera) error
-	Get(ctx context.Context, id string) (*model.Camera, error)
-	Update(ctx context.Context, id string, cam *model.Camera) error
-	Delete(ctx context.Context, id string) error
-	Connect(ctx context.Context, id string) error
-	Disconnect(ctx context.Context, id string) error
-	GetStreamURLs(ctx context.Context, id string) (*StreamURLs, error)
+	Get(ctx context.Context, tenantID int64, id string) (*model.Camera, error)
+	Update(ctx context.Context, tenantID int64, id string, cam *model.Camera) error
+	Delete(ctx context.Context, tenantID int64, id string) error
+	Connect(ctx context.Context, tenantID int64, id string) error
+	Disconnect(ctx context.Context, tenantID int64, id string) error
+	GetStreamURLs(ctx context.Context, tenantID int64, id string) (*StreamURLs, error)
 	UpdateStatus(ctx context.Context, id string, status string) error
 	Discover(ctx context.Context, interfaceName string, timeoutSec int) ([]onvif.DiscoveredDevice, error)
 	ProbeONVIF(ctx context.Context, ip string, port int, username, password string) (*onvif.DiscoveredDevice, error)
 	ScanONVIF(ctx context.Context, cidr string, port int, username, password string, timeoutSec int) ([]onvif.DiscoveredDevice, error)
-	Snapshot(ctx context.Context, id string) (*SnapshotResult, error)
+	Snapshot(ctx context.Context, tenantID int64, id string) (*SnapshotResult, error)
 	ListStatuses(ctx context.Context) ([]CameraStatus, error)
 	DeleteAll(ctx context.Context, tenantID int64) (int64, error)
 }
@@ -64,6 +64,21 @@ type service struct {
 
 func NewService(repo Repository, mtx *mediamtx.Client, recordPath, segmentDuration string) Service {
 	return &service{repo: repo, mtx: mtx, recordPath: recordPath, segmentDuration: segmentDuration}
+}
+
+// getForTenant loads a camera and enforces tenant isolation.
+// Returns ErrCameraNotFound when the camera does not exist, and ErrForbidden
+// when it exists but belongs to another tenant (design doc: 越权返回 403).
+func (s *service) getForTenant(tenantID int64, id string) (*model.Camera, error) {
+	cam, err := s.repo.FindByIDAndTenant(id, tenantID)
+	if err == nil {
+		return cam, nil
+	}
+	// Distinguish "not found" from "belongs to another tenant".
+	if _, err := s.repo.FindByID(id); err == nil {
+		return nil, apperror.ErrForbidden.WithMessage("camera belongs to another tenant")
+	}
+	return nil, apperror.ErrCameraNotFound
 }
 
 // buildPathConfig constructs the self-contained PathConfig for a camera.
@@ -149,22 +164,18 @@ func (s *service) Create(ctx context.Context, cam *model.Camera) error {
 	return nil
 }
 
-func (s *service) Get(ctx context.Context, id string) (*model.Camera, error) {
-	cam, err := s.repo.FindByID(id)
-	if err != nil {
-		return nil, apperror.ErrCameraNotFound
-	}
-	return cam, nil
+func (s *service) Get(ctx context.Context, tenantID int64, id string) (*model.Camera, error) {
+	return s.getForTenant(tenantID, id)
 }
 
-func (s *service) Update(ctx context.Context, id string, cam *model.Camera) error {
+func (s *service) Update(ctx context.Context, tenantID int64, id string, cam *model.Camera) error {
 	if err := validateCamera(cam); err != nil {
 		return err
 	}
 
-	existing, err := s.repo.FindByID(id)
+	existing, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return apperror.ErrCameraNotFound
+		return err
 	}
 
 	if exists, err := s.repo.ExistsByName(existing.LicenseID, cam.Name, id); err != nil {
@@ -188,6 +199,7 @@ func (s *service) Update(ctx context.Context, id string, cam *model.Camera) erro
 	existing.Name = cam.Name
 	existing.IP = cam.IP
 	existing.Port = cam.Port
+	existing.Protocol = cam.Protocol
 	existing.Username = cam.Username
 	if cam.Password != "" {
 		// Re-encrypt when a new plaintext password is provided; otherwise keep existing.
@@ -199,6 +211,12 @@ func (s *service) Update(ctx context.Context, id string, cam *model.Camera) erro
 	}
 	existing.StreamURL = cam.StreamURL
 	existing.SubStreamURL = cam.SubStreamURL
+	// Copy descriptive fields that were previously silently dropped.
+	existing.Manufacturer = cam.Manufacturer
+	existing.Model = cam.Model
+	existing.SiteID = cam.SiteID
+	existing.Latitude = cam.Latitude
+	existing.Longitude = cam.Longitude
 	existing.UpdatedAt = time.Now()
 
 	if err := s.repo.Update(existing); err != nil {
@@ -214,10 +232,10 @@ func (s *service) Update(ctx context.Context, id string, cam *model.Camera) erro
 	return nil
 }
 
-func (s *service) Delete(ctx context.Context, id string) error {
-	cam, err := s.repo.FindByID(id)
+func (s *service) Delete(ctx context.Context, tenantID int64, id string) error {
+	cam, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return apperror.ErrCameraNotFound
+		return err
 	}
 	_ = s.mtx.DeletePath(cam.MediaMTXPath)
 	return s.repo.Delete(id)
@@ -239,10 +257,10 @@ func (s *service) DeleteAll(ctx context.Context, tenantID int64) (int64, error) 
 	return count, nil
 }
 
-func (s *service) Connect(ctx context.Context, id string) error {
-	cam, err := s.repo.FindByID(id)
+func (s *service) Connect(ctx context.Context, tenantID int64, id string) error {
+	cam, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return apperror.ErrCameraNotFound
+		return err
 	}
 	if err := s.mtx.AddPath(cam.MediaMTXPath, s.buildPathConfig(cam)); err != nil {
 		return err
@@ -251,10 +269,10 @@ func (s *service) Connect(ctx context.Context, id string) error {
 	return s.repo.UpdateStatus(id, "connecting")
 }
 
-func (s *service) Disconnect(ctx context.Context, id string) error {
-	cam, err := s.repo.FindByID(id)
+func (s *service) Disconnect(ctx context.Context, tenantID int64, id string) error {
+	cam, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return apperror.ErrCameraNotFound
+		return err
 	}
 	if err := s.mtx.DeletePath(cam.MediaMTXPath); err != nil {
 		return err
@@ -263,10 +281,10 @@ func (s *service) Disconnect(ctx context.Context, id string) error {
 	return s.repo.UpdateStatus(id, "disconnected")
 }
 
-func (s *service) GetStreamURLs(ctx context.Context, id string) (*StreamURLs, error) {
-	cam, err := s.repo.FindByID(id)
+func (s *service) GetStreamURLs(ctx context.Context, tenantID int64, id string) (*StreamURLs, error) {
+	cam, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return nil, apperror.ErrCameraNotFound
+		return nil, err
 	}
 	return &StreamURLs{
 		FLV:    fmt.Sprintf("/live/%s/stream.flv", cam.MediaMTXPath),
@@ -392,10 +410,10 @@ func incIP(ip net.IP) {
 	}
 }
 
-func (s *service) Snapshot(ctx context.Context, id string) (*SnapshotResult, error) {
-	cam, err := s.repo.FindByID(id)
+func (s *service) Snapshot(ctx context.Context, tenantID int64, id string) (*SnapshotResult, error) {
+	cam, err := s.getForTenant(tenantID, id)
 	if err != nil {
-		return nil, apperror.ErrCameraNotFound
+		return nil, err
 	}
 	return &SnapshotResult{
 		CameraID: cam.ID,

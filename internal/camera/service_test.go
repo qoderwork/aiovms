@@ -8,6 +8,7 @@ import (
 
 	"aiovms/internal/mediamtx"
 	"aiovms/internal/model"
+	"aiovms/pkg/apperror"
 	"aiovms/pkg/crypto"
 )
 
@@ -53,6 +54,16 @@ func (m *mockRepo) FindByID(id string) (*model.Camera, error) {
 	}
 	c, ok := m.cams[id]
 	if !ok {
+		return nil, errors.New("not found")
+	}
+	return c, nil
+}
+func (m *mockRepo) FindByIDAndTenant(id string, tenantID int64) (*model.Camera, error) {
+	if m.findByIDErr != nil {
+		return nil, m.findByIDErr
+	}
+	c, ok := m.cams[id]
+	if !ok || c.LicenseID != tenantID {
 		return nil, errors.New("not found")
 	}
 	return c, nil
@@ -164,7 +175,7 @@ func TestServiceGetFound(t *testing.T) {
 	repo := newMockRepo()
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", Name: "test-cam"}
 	svc := &service{repo: repo, mtx: &mockMTX{}}
-	cam, err := svc.Get(context.Background(), "id-1")
+	cam, err := svc.Get(context.Background(), 0, "id-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -176,9 +187,28 @@ func TestServiceGetFound(t *testing.T) {
 func TestServiceGetNotFound(t *testing.T) {
 	repo := newMockRepo()
 	svc := &service{repo: repo, mtx: &mockMTX{}}
-	_, err := svc.Get(context.Background(), "no-such-id")
+	_, err := svc.Get(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestServiceGetCrossTenantForbidden verifies that reading a camera belonging
+// to another tenant returns 403 (design doc: 越权返回 403).
+func TestServiceGetCrossTenantForbidden(t *testing.T) {
+	repo := newMockRepo()
+	repo.cams["id-1"] = &model.Camera{ID: "id-1", Name: "other-tenant-cam", LicenseID: 100}
+	svc := &service{repo: repo, mtx: &mockMTX{}}
+	_, err := svc.Get(context.Background(), 200, "id-1")
+	if err == nil {
+		t.Fatal("expected forbidden error, got nil")
+	}
+	appErr, ok := err.(*apperror.AppError)
+	if !ok {
+		t.Fatalf("expected *apperror.AppError, got %T", err)
+	}
+	if appErr.StatusCode != 403 {
+		t.Errorf("status = %d, want 403", appErr.StatusCode)
 	}
 }
 
@@ -231,13 +261,20 @@ func TestServiceUpdate(t *testing.T) {
 	}
 	svc := &service{repo: repo, mtx: &mockMTX{}}
 
-	err := svc.Update(context.Background(), "id-1", &model.Camera{
-		Name:     "new-name",
-		IP:       "10.0.0.2",
-		Port:     554,
-		Protocol: "RTSP",
-		StreamURL: "rtsp://10.0.0.2/stream",
-		Password: "newpass",
+	siteID := "site-9"
+	lat, lon := 31.230400, 121.473700
+	err := svc.Update(context.Background(), 0, "id-1", &model.Camera{
+		Name:         "new-name",
+		IP:           "10.0.0.2",
+		Port:         554,
+		Protocol:     "ONVIF",
+		StreamURL:    "rtsp://10.0.0.2/stream",
+		Password:     "newpass",
+		Manufacturer: "Hikvision",
+		Model:        "DS-2CD",
+		SiteID:       &siteID,
+		Latitude:     &lat,
+		Longitude:    &lon,
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
@@ -251,14 +288,56 @@ func TestServiceUpdate(t *testing.T) {
 	if repo.lastUpdated.PasswordEnc == "" {
 		t.Error("expected re-encrypted password")
 	}
+	// Regression: these fields used to be silently dropped on update.
+	if repo.lastUpdated.Protocol != "ONVIF" {
+		t.Errorf("protocol = %q, want 'ONVIF'", repo.lastUpdated.Protocol)
+	}
+	if repo.lastUpdated.Manufacturer != "Hikvision" {
+		t.Errorf("manufacturer = %q, want 'Hikvision'", repo.lastUpdated.Manufacturer)
+	}
+	if repo.lastUpdated.Model != "DS-2CD" {
+		t.Errorf("model = %q, want 'DS-2CD'", repo.lastUpdated.Model)
+	}
+	if repo.lastUpdated.SiteID == nil || *repo.lastUpdated.SiteID != "site-9" {
+		t.Errorf("site_id = %v, want 'site-9'", repo.lastUpdated.SiteID)
+	}
+	if repo.lastUpdated.Latitude == nil || *repo.lastUpdated.Latitude != lat {
+		t.Errorf("latitude = %v, want %v", repo.lastUpdated.Latitude, lat)
+	}
+	if repo.lastUpdated.Longitude == nil || *repo.lastUpdated.Longitude != lon {
+		t.Errorf("longitude = %v, want %v", repo.lastUpdated.Longitude, lon)
+	}
 }
 
 func TestServiceUpdateNotFound(t *testing.T) {
 	repo := newMockRepo()
 	svc := &service{repo: repo, mtx: &mockMTX{}}
-	err := svc.Update(context.Background(), "no-such-id", &model.Camera{Name: "x"})
+	err := svc.Update(context.Background(), 0, "no-such-id", &model.Camera{Name: "x"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestServiceUpdateCrossTenantForbidden verifies that updating another
+// tenant's camera returns 403.
+func TestServiceUpdateCrossTenantForbidden(t *testing.T) {
+	initCrypto(t)
+	repo := newMockRepo()
+	repo.cams["id-1"] = &model.Camera{ID: "id-1", Name: "other", LicenseID: 100, MediaMTXPath: "cam-id-1"}
+	svc := &service{repo: repo, mtx: &mockMTX{}}
+	err := svc.Update(context.Background(), 200, "id-1", &model.Camera{
+		Name: "hacked", IP: "10.0.0.9", Port: 554, Protocol: "RTSP",
+		StreamURL: "rtsp://10.0.0.9/stream",
+	})
+	if err == nil {
+		t.Fatal("expected forbidden error, got nil")
+	}
+	appErr, ok := err.(*apperror.AppError)
+	if !ok || appErr.StatusCode != 403 {
+		t.Errorf("expected 403 AppError, got %v", err)
+	}
+	if repo.cams["id-1"].Name != "other" {
+		t.Errorf("camera was modified across tenants: name = %q", repo.cams["id-1"].Name)
 	}
 }
 
@@ -268,7 +347,7 @@ func TestServiceDelete(t *testing.T) {
 	mtx := &mockMTX{}
 	svc := &service{repo: repo, mtx: mtx}
 
-	err := svc.Delete(context.Background(), "id-1")
+	err := svc.Delete(context.Background(), 0, "id-1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -283,9 +362,28 @@ func TestServiceDelete(t *testing.T) {
 func TestServiceDeleteNotFound(t *testing.T) {
 	repo := newMockRepo()
 	svc := &service{repo: repo, mtx: &mockMTX{}}
-	err := svc.Delete(context.Background(), "no-such-id")
+	err := svc.Delete(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestServiceDeleteCrossTenantForbidden verifies that deleting another
+// tenant's camera returns 403 and leaves the record intact.
+func TestServiceDeleteCrossTenantForbidden(t *testing.T) {
+	repo := newMockRepo()
+	repo.cams["id-1"] = &model.Camera{ID: "id-1", LicenseID: 100, MediaMTXPath: "cam-id-1"}
+	mtx := &mockMTX{}
+	svc := &service{repo: repo, mtx: mtx}
+	err := svc.Delete(context.Background(), 200, "id-1")
+	if err == nil {
+		t.Fatal("expected forbidden error, got nil")
+	}
+	if _, exists := repo.cams["id-1"]; !exists {
+		t.Error("camera was deleted across tenants")
+	}
+	if len(mtx.deletePathCalls) != 0 {
+		t.Errorf("expected no DeletePath call on forbidden delete, got %d", len(mtx.deletePathCalls))
 	}
 }
 
@@ -297,7 +395,7 @@ func TestServiceConnect(t *testing.T) {
 	}
 	svc := &service{repo: repo, mtx: &mockMTX{}}
 
-	err := svc.Connect(context.Background(), "id-1")
+	err := svc.Connect(context.Background(), 0, "id-1")
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -315,7 +413,7 @@ func TestServiceDisconnect(t *testing.T) {
 	mtx := &mockMTX{}
 	svc := &service{repo: repo, mtx: mtx}
 
-	err := svc.Disconnect(context.Background(), "id-1")
+	err := svc.Disconnect(context.Background(), 0, "id-1")
 	if err != nil {
 		t.Fatalf("Disconnect: %v", err)
 	}
@@ -330,7 +428,7 @@ func TestServiceGetStreamURLs(t *testing.T) {
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", MediaMTXPath: "cam-id-1"}
 	svc := &service{repo: repo, mtx: &mockMTX{}}
 
-	urls, err := svc.GetStreamURLs(context.Background(), "id-1")
+	urls, err := svc.GetStreamURLs(context.Background(), 0, "id-1")
 	if err != nil {
 		t.Fatalf("GetStreamURLs: %v", err)
 	}
@@ -350,7 +448,7 @@ func TestServiceSnapshot(t *testing.T) {
 	repo.cams["id-1"] = &model.Camera{ID: "id-1", MediaMTXPath: "cam-id-1"}
 	svc := &service{repo: repo, mtx: &mockMTX{}}
 
-	result, err := svc.Snapshot(context.Background(), "id-1")
+	result, err := svc.Snapshot(context.Background(), 0, "id-1")
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
@@ -377,7 +475,7 @@ func TestServiceListStatuses(t *testing.T) {
 func TestServiceConnectNotFound(t *testing.T) {
 	repo := newMockRepo()
 	svc := &service{repo: repo, mtx: &mockMTX{}}
-	err := svc.Connect(context.Background(), "no-such-id")
+	err := svc.Connect(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -386,7 +484,7 @@ func TestServiceConnectNotFound(t *testing.T) {
 func TestServiceDisconnectNotFound(t *testing.T) {
 	repo := newMockRepo()
 	svc := &service{repo: repo, mtx: &mockMTX{}}
-	err := svc.Disconnect(context.Background(), "no-such-id")
+	err := svc.Disconnect(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

@@ -11,6 +11,9 @@ type Repository interface {
 	Update(sch *model.RecordSchedule) error
 	FindAll(tenantID int64, cameraID string) ([]model.RecordSchedule, error)
 	FindByID(id string) (*model.RecordSchedule, error)
+	// FindByIDAndTenant loads a schedule only if it belongs to the given tenant.
+	// All request-facing lookups MUST use this method to enforce tenant isolation.
+	FindByIDAndTenant(id string, tenantID int64) (*model.RecordSchedule, error)
 	Delete(id string) error
 	FindAllEnabled() ([]model.RecordSchedule, error)
 }
@@ -29,6 +32,15 @@ func NewRepository(db *gorm.DB) Repository {
 
 func (r *repository) Update(sch *model.RecordSchedule) error {
 	return r.db.Save(sch).Error
+}
+
+func (r *repository) FindByIDAndTenant(id string, tenantID int64) (*model.RecordSchedule, error) {
+	var sch model.RecordSchedule
+	err := r.db.Where("id = ? AND license_id = ?", id, tenantID).First(&sch).Error
+	if err != nil {
+		return nil, err
+	}
+	return &sch, nil
 }
 
 func (r *repository) FindAll(tenantID int64, cameraID string) ([]model.RecordSchedule, error) {

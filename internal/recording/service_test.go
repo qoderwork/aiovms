@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"aiovms/internal/model"
+	"aiovms/pkg/apperror"
 )
 
 // --- mocks ---
@@ -50,6 +51,16 @@ func (m *mockRepo) FindByID(id string) (*model.Recording, error) {
 	}
 	r, ok := m.recs[id]
 	if !ok {
+		return nil, errors.New("not found")
+	}
+	return r, nil
+}
+func (m *mockRepo) FindByIDAndTenant(id string, tenantID int64) (*model.Recording, error) {
+	if m.findByIDErr != nil {
+		return nil, m.findByIDErr
+	}
+	r, ok := m.recs[id]
+	if !ok || r.LicenseID != tenantID {
 		return nil, errors.New("not found")
 	}
 	return r, nil
@@ -128,12 +139,12 @@ type mockCameraSvc struct {
 	getErr error
 }
 
-func (m *mockCameraSvc) Get(ctx context.Context, id string) (*model.Camera, error) {
+func (m *mockCameraSvc) Get(ctx context.Context, tenantID int64, id string) (*model.Camera, error) {
 	if m.getErr != nil {
 		return nil, m.getErr
 	}
 	c, ok := m.cams[id]
-	if !ok {
+	if !ok || c.LicenseID != tenantID {
 		return nil, errors.New("not found")
 	}
 	return c, nil
@@ -179,7 +190,7 @@ func TestRecordingGet(t *testing.T) {
 	}
 	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
 
-	rec, playURL, err := svc.Get(context.Background(), "r1")
+	rec, playURL, err := svc.Get(context.Background(), 0, "r1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -194,9 +205,25 @@ func TestRecordingGet(t *testing.T) {
 func TestRecordingGetNotFound(t *testing.T) {
 	repo := newMockRepo()
 	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
-	_, _, err := svc.Get(context.Background(), "no-such-id")
+	_, _, err := svc.Get(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestRecordingGetCrossTenantForbidden verifies that reading another tenant's
+// recording returns 403 (design doc: 越权返回 403).
+func TestRecordingGetCrossTenantForbidden(t *testing.T) {
+	repo := newMockRepo()
+	repo.recs["r1"] = &model.Recording{ID: "r1", CameraID: "cam-1", LicenseID: 100}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	_, _, err := svc.Get(context.Background(), 200, "r1")
+	if err == nil {
+		t.Fatal("expected forbidden error, got nil")
+	}
+	appErr, ok := err.(*apperror.AppError)
+	if !ok || appErr.StatusCode != 403 {
+		t.Errorf("expected 403 AppError, got %v", err)
 	}
 }
 
@@ -205,7 +232,7 @@ func TestRecordingDelete(t *testing.T) {
 	repo.recs["r1"] = &model.Recording{ID: "r1", CameraID: "cam-1", FilePath: "/tmp/test.mp4"}
 	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
 
-	err := svc.Delete(context.Background(), "r1")
+	err := svc.Delete(context.Background(), 0, "r1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -220,9 +247,24 @@ func TestRecordingDelete(t *testing.T) {
 func TestRecordingDeleteNotFound(t *testing.T) {
 	repo := newMockRepo()
 	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
-	err := svc.Delete(context.Background(), "no-such-id")
+	err := svc.Delete(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestRecordingDeleteCrossTenantForbidden verifies that deleting another
+// tenant's recording returns 403 and leaves the record intact.
+func TestRecordingDeleteCrossTenantForbidden(t *testing.T) {
+	repo := newMockRepo()
+	repo.recs["r1"] = &model.Recording{ID: "r1", CameraID: "cam-1", LicenseID: 100}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	err := svc.Delete(context.Background(), 200, "r1")
+	if err == nil {
+		t.Fatal("expected forbidden error, got nil")
+	}
+	if _, exists := repo.recs["r1"]; !exists {
+		t.Error("recording was deleted across tenants")
 	}
 }
 
@@ -236,7 +278,7 @@ func TestRecordingStartManual(t *testing.T) {
 	mtx := &mockMTX{}
 	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
 
-	err := svc.StartManual(context.Background(), "cam-1")
+	err := svc.StartManual(context.Background(), 1, "cam-1")
 	if err != nil {
 		t.Fatalf("StartManual: %v", err)
 	}
@@ -267,9 +309,33 @@ func TestRecordingStartManualCameraNotFound(t *testing.T) {
 	camSvc := &mockCameraSvc{cams: make(map[string]*model.Camera)}
 	svc := &service{repo: repo, camSvc: camSvc, mtx: &mockMTX{}}
 
-	err := svc.StartManual(context.Background(), "cam-1")
+	err := svc.StartManual(context.Background(), 1, "cam-1")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestRecordingStartManualCrossTenant verifies that starting a recording on
+// another tenant's camera is rejected.
+func TestRecordingStartManualCrossTenant(t *testing.T) {
+	repo := newMockRepo()
+	camSvc := &mockCameraSvc{
+		cams: map[string]*model.Camera{
+			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
+		},
+	}
+	mtx := &mockMTX{}
+	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
+
+	err := svc.StartManual(context.Background(), 2, "cam-1")
+	if err == nil {
+		t.Fatal("expected error for cross-tenant camera, got nil")
+	}
+	if len(mtx.patchPathCalls) != 0 {
+		t.Errorf("expected no PatchPath call on cross-tenant start, got %d", len(mtx.patchPathCalls))
+	}
+	if repo.lastCreatedSession != nil {
+		t.Error("expected no session created on cross-tenant start")
 	}
 }
 
@@ -286,7 +352,7 @@ func TestRecordingStopManual(t *testing.T) {
 	mtx := &mockMTX{}
 	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
 
-	err := svc.StopManual(context.Background(), "cam-1")
+	err := svc.StopManual(context.Background(), 0, "cam-1")
 	if err != nil {
 		t.Fatalf("StopManual: %v", err)
 	}
@@ -298,6 +364,58 @@ func TestRecordingStopManual(t *testing.T) {
 	}
 	if repo.lastClosedSessionID != "ses-1" {
 		t.Errorf("expected session ses-1 closed, got %q", repo.lastClosedSessionID)
+	}
+}
+
+// TestRecordingStopManualClosesSessionEvenIfPatchFails is a regression test
+// for the stop race: the session (desired state) must be closed BEFORE the
+// MediaMTX stop patch, otherwise the reconciler's drift recovery re-enables
+// record:true while the session is still open and the stop is silently undone.
+func TestRecordingStopManualClosesSessionEvenIfPatchFails(t *testing.T) {
+	repo := newMockRepo()
+	repo.activeSessions = []model.RecordingSession{
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
+	}
+	camSvc := &mockCameraSvc{
+		cams: map[string]*model.Camera{
+			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1"},
+		},
+	}
+	mtx := &mockMTX{patchPathErr: errors.New("mediamtx down")}
+	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
+
+	err := svc.StopManual(context.Background(), 0, "cam-1")
+	if err == nil {
+		t.Fatal("expected error when MediaMTX patch fails")
+	}
+	// Session must already be closed so the reconciler will not re-enable
+	// recording; its orphan-record repair finishes the stop later.
+	if repo.lastClosedSessionID != "ses-1" {
+		t.Errorf("expected session ses-1 closed despite patch failure, got %q", repo.lastClosedSessionID)
+	}
+}
+
+// TestRecordingStopManualNoSessionStillPatches verifies that stopping when no
+// active session exists still patches MediaMTX (idempotent cleanup of a
+// possible orphan recording state).
+func TestRecordingStopManualNoSessionStillPatches(t *testing.T) {
+	repo := newMockRepo()
+	camSvc := &mockCameraSvc{
+		cams: map[string]*model.Camera{
+			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1"},
+		},
+	}
+	mtx := &mockMTX{}
+	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
+
+	if err := svc.StopManual(context.Background(), 0, "cam-1"); err != nil {
+		t.Fatalf("StopManual: %v", err)
+	}
+	if len(mtx.patchPathCalls) != 1 {
+		t.Fatalf("expected 1 PatchPath call, got %d", len(mtx.patchPathCalls))
+	}
+	if v, ok := mtx.patchPathCalls[0].patch["record"]; !ok || v != false {
+		t.Error("expected patch record=false")
 	}
 }
 

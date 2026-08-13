@@ -10,6 +10,9 @@ type Repository interface {
 	Create(cam *model.Camera) error
 	Update(cam *model.Camera) error
 	FindByID(id string) (*model.Camera, error)
+	// FindByIDAndTenant loads a camera only if it belongs to the given tenant.
+	// All request-facing lookups MUST use this method to enforce tenant isolation.
+	FindByIDAndTenant(id string, tenantID int64) (*model.Camera, error)
 	FindByMediaMTXPath(path string) (*model.Camera, error)
 	ListByTenant(tenantID int64, query string, offset, limit int) ([]model.Camera, int64, error)
 	Delete(id string) error
@@ -36,6 +39,15 @@ func NewRepository(db *gorm.DB) Repository {
 
 func (r *repository) Update(cam *model.Camera) error {
 	return r.db.Save(cam).Error
+}
+
+func (r *repository) FindByIDAndTenant(id string, tenantID int64) (*model.Camera, error) {
+	var cam model.Camera
+	err := r.db.Where("id = ? AND license_id = ?", id, tenantID).First(&cam).Error
+	if err != nil {
+		return nil, err
+	}
+	return &cam, nil
 }
 
 func (r *repository) ListByTenant(tenantID int64, query string, offset, limit int) ([]model.Camera, int64, error) {

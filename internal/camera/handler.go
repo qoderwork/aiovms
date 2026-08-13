@@ -169,7 +169,8 @@ func (h *Handler) Create(c *gin.Context) {
 // @Security UserHeader
 // @Router /cameras/{id} [get]
 func (h *Handler) Get(c *gin.Context) {
-	cam, err := h.svc.Get(c.Request.Context(), c.Param("id"))
+	tenantID := int64(middleware.GetTenantID(c))
+	cam, err := h.svc.Get(c.Request.Context(), tenantID, c.Param("id"))
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -198,8 +199,9 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 	id := c.Param("id")
+	tenantID := int64(middleware.GetTenantID(c))
 	cam := req.toCamera()
-	if err := h.svc.Update(c.Request.Context(), id, &cam); err != nil {
+	if err := h.svc.Update(c.Request.Context(), tenantID, id, &cam); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
@@ -221,12 +223,13 @@ func (h *Handler) Update(c *gin.Context) {
 // @Router /cameras/{id} [delete]
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
-	cam, err := h.svc.Get(c.Request.Context(), id)
+	tenantID := int64(middleware.GetTenantID(c))
+	cam, err := h.svc.Get(c.Request.Context(), tenantID, id)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
 	}
-	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), tenantID, id); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
@@ -247,7 +250,8 @@ func (h *Handler) Delete(c *gin.Context) {
 // @Security UserHeader
 // @Router /cameras/{id}/connect [post]
 func (h *Handler) Connect(c *gin.Context) {
-	if err := h.svc.Connect(c.Request.Context(), c.Param("id")); err != nil {
+	tenantID := int64(middleware.GetTenantID(c))
+	if err := h.svc.Connect(c.Request.Context(), tenantID, c.Param("id")); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
@@ -266,7 +270,8 @@ func (h *Handler) Connect(c *gin.Context) {
 // @Security UserHeader
 // @Router /cameras/{id}/disconnect [post]
 func (h *Handler) Disconnect(c *gin.Context) {
-	if err := h.svc.Disconnect(c.Request.Context(), c.Param("id")); err != nil {
+	tenantID := int64(middleware.GetTenantID(c))
+	if err := h.svc.Disconnect(c.Request.Context(), tenantID, c.Param("id")); err != nil {
 		utils.HandleError(c, err)
 		return
 	}
@@ -285,7 +290,8 @@ func (h *Handler) Disconnect(c *gin.Context) {
 // @Security UserHeader
 // @Router /cameras/{id}/stream-urls [get]
 func (h *Handler) Stream(c *gin.Context) {
-	urls, err := h.svc.GetStreamURLs(c.Request.Context(), c.Param("id"))
+	tenantID := int64(middleware.GetTenantID(c))
+	urls, err := h.svc.GetStreamURLs(c.Request.Context(), tenantID, c.Param("id"))
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -305,7 +311,8 @@ func (h *Handler) Stream(c *gin.Context) {
 // @Security UserHeader
 // @Router /cameras/{id}/stream [get]
 func (h *Handler) StreamFLV(c *gin.Context) {
-	urls, err := h.svc.GetStreamURLs(c.Request.Context(), c.Param("id"))
+	tenantID := int64(middleware.GetTenantID(c))
+	urls, err := h.svc.GetStreamURLs(c.Request.Context(), tenantID, c.Param("id"))
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -325,7 +332,8 @@ func (h *Handler) StreamFLV(c *gin.Context) {
 // @Security UserHeader
 // @Router /cameras/{id}/stream/hls [get]
 func (h *Handler) StreamHLS(c *gin.Context) {
-	urls, err := h.svc.GetStreamURLs(c.Request.Context(), c.Param("id"))
+	tenantID := int64(middleware.GetTenantID(c))
+	urls, err := h.svc.GetStreamURLs(c.Request.Context(), tenantID, c.Param("id"))
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -345,7 +353,8 @@ func (h *Handler) StreamHLS(c *gin.Context) {
 // @Security UserHeader
 // @Router /cameras/{id}/stream/webrtc [get]
 func (h *Handler) StreamWebRTC(c *gin.Context) {
-	urls, err := h.svc.GetStreamURLs(c.Request.Context(), c.Param("id"))
+	tenantID := int64(middleware.GetTenantID(c))
+	urls, err := h.svc.GetStreamURLs(c.Request.Context(), tenantID, c.Param("id"))
 	if err != nil {
 		utils.HandleError(c, err)
 		return
@@ -476,7 +485,8 @@ func (h *Handler) ScanONVIF(c *gin.Context) {
 // @Security UserHeader
 // @Router /cameras/{id}/snapshot [get]
 func (h *Handler) Snapshot(c *gin.Context) {
-	result, err := h.svc.Snapshot(c.Request.Context(), c.Param("id"))
+	tenantID := int64(middleware.GetTenantID(c))
+	result, err := h.svc.Snapshot(c.Request.Context(), tenantID, c.Param("id"))
 	if err != nil {
 		utils.HandleError(c, err)
 		return

@@ -19,6 +19,9 @@ func (m *mockRepoForRetention) Create(rec *model.Recording) error          { ret
 func (m *mockRepoForRetention) Update(rec *model.Recording) error          { return nil }
 func (m *mockRepoForRetention) Upsert(rec *model.Recording) error          { return nil }
 func (m *mockRepoForRetention) FindByID(id string) (*model.Recording, error) { return nil, nil }
+func (m *mockRepoForRetention) FindByIDAndTenant(id string, tenantID int64) (*model.Recording, error) {
+	return nil, nil
+}
 func (m *mockRepoForRetention) FindAll(tenantID int64, cameraID, startTime, endTime string, offset, limit int) ([]model.Recording, int64, error) {
 	return nil, 0, nil
 }

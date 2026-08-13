@@ -14,6 +14,9 @@ type Repository interface {
 	Update(rec *model.Recording) error
 	Upsert(rec *model.Recording) error
 	FindByID(id string) (*model.Recording, error)
+	// FindByIDAndTenant loads a recording only if it belongs to the given tenant.
+	// All request-facing lookups MUST use this method to enforce tenant isolation.
+	FindByIDAndTenant(id string, tenantID int64) (*model.Recording, error)
 	FindAll(tenantID int64, cameraID, startTime, endTime string, offset, limit int) ([]model.Recording, int64, error)
 	Delete(rec *model.Recording) error
 	DeleteByIDs(ids []string) error
@@ -49,6 +52,15 @@ func NewRepository(db *gorm.DB) Repository {
 
 func (r *repository) Update(rec *model.Recording) error {
 	return r.db.Save(rec).Error
+}
+
+func (r *repository) FindByIDAndTenant(id string, tenantID int64) (*model.Recording, error) {
+	var rec model.Recording
+	err := r.db.Where("id = ? AND license_id = ?", id, tenantID).First(&rec).Error
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
 }
 
 // Upsert inserts a recording or updates matching file_path via ON DUPLICATE KEY UPDATE.
