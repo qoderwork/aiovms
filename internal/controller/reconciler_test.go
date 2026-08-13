@@ -141,62 +141,59 @@ func (m *mockRecRepo) CloseSession(id string, endTime time.Time) error {
 	return nil
 }
 
-type mockMTXClient struct {
-	addPathCalls    []struct{ name string; cfg mediamtx.PathConfig }
-	addPathErr      error
-	deletePathCalls []string
-	deletePathErr   error
-	patchPathCalls  []struct{ name string; patch map[string]any }
-	patchPathErr    error
+// mockMTXReader implements MTXReader (read-only MediaMTX surface).
+type mockMTXReader struct {
 	pathConfigs     map[string]mediamtx.PathConfigItem
 	listConfigsErr  error
 	healthErr       error
 	healthCallCount int
 }
 
-func (m *mockMTXClient) AddPath(name string, cfg mediamtx.PathConfig) error {
-	m.addPathCalls = append(m.addPathCalls, struct {
-		name string
-		cfg  mediamtx.PathConfig
-	}{name, cfg})
-	return m.addPathErr
-}
-
-func (m *mockMTXClient) DeletePath(name string) error {
-	m.deletePathCalls = append(m.deletePathCalls, name)
-	return m.deletePathErr
-}
-
-func (m *mockMTXClient) PatchPath(name string, patch map[string]any) error {
-	m.patchPathCalls = append(m.patchPathCalls, struct {
-		name  string
-		patch map[string]any
-	}{name, patch})
-	return m.patchPathErr
-}
-
-func (m *mockMTXClient) ListPathConfigs() (map[string]mediamtx.PathConfigItem, error) {
+func (m *mockMTXReader) ListPathConfigs() (map[string]mediamtx.PathConfigItem, error) {
 	return m.pathConfigs, m.listConfigsErr
 }
 
-func (m *mockMTXClient) HealthCheck() error {
+func (m *mockMTXReader) HealthCheck() error {
 	m.healthCallCount++
 	return m.healthErr
+}
+
+// mockActuator implements MTXActuator (write surface; records enqueued commands).
+type mockActuator struct {
+	ensurePathCalls []struct{ name string; cfg mediamtx.PathConfig }
+	deletePathCalls []string
+	setRecordCalls  []struct{ path string; on bool }
+}
+
+func (m *mockActuator) EnqueueEnsurePath(name string, cfg mediamtx.PathConfig) {
+	m.ensurePathCalls = append(m.ensurePathCalls, struct {
+		name string
+		cfg  mediamtx.PathConfig
+	}{name, cfg})
+}
+
+func (m *mockActuator) EnqueueDeletePath(name string) {
+	m.deletePathCalls = append(m.deletePathCalls, name)
+}
+
+func (m *mockActuator) EnqueueSetRecord(path string, on bool) {
+	m.setRecordCalls = append(m.setRecordCalls, struct{ path string; on bool }{path, on})
 }
 
 // ---------------------------------------------------------------------------
 // Helper: build a reconciler with mocks
 // ---------------------------------------------------------------------------
 
-func newTestReconciler() (*Reconciler, *mockCameraRepo, *mockScheduleRepo, *mockRecRepo, *mockMTXClient) {
+func newTestReconciler() (*Reconciler, *mockCameraRepo, *mockScheduleRepo, *mockRecRepo, *mockMTXReader, *mockActuator) {
 	camRepo := &mockCameraRepo{}
 	schRepo := &mockScheduleRepo{}
 	recRepo := &mockRecRepo{}
-	mtx := &mockMTXClient{
+	reader := &mockMTXReader{
 		pathConfigs: make(map[string]mediamtx.PathConfigItem),
 	}
-	r := NewReconciler(camRepo, schRepo, recRepo, mtx, "/recordings", "1h")
-	return r, camRepo, schRepo, recRepo, mtx
+	act := &mockActuator{}
+	r := NewReconciler(camRepo, schRepo, recRepo, reader, act, "/recordings", "1h")
+	return r, camRepo, schRepo, recRepo, reader, act
 }
 
 func ptr(s string) *string { return &s }
@@ -206,18 +203,18 @@ func ptr(s string) *string { return &s }
 // ---------------------------------------------------------------------------
 
 func TestReconcileStreams_CreatesMissingPath(t *testing.T) {
-	r, camRepo, _, _, mtx := newTestReconciler()
+	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", StreamURL: "rtsp://1.2.3.4/stream"},
 	}
 	// MTX has no paths at all
 
-	r.reconcileStreams(mtx.pathConfigs)
+	r.reconcileStreams(reader.pathConfigs)
 
-	if len(mtx.addPathCalls) != 1 {
-		t.Fatalf("expected 1 AddPath call, got %d", len(mtx.addPathCalls))
+	if len(act.ensurePathCalls) != 1 {
+		t.Fatalf("expected 1 EnsurePath call, got %d", len(act.ensurePathCalls))
 	}
-	call := mtx.addPathCalls[0]
+	call := act.ensurePathCalls[0]
 	if call.name != "cam-cam-1" {
 		t.Errorf("path name = %q, want 'cam-cam-1'", call.name)
 	}
@@ -237,24 +234,24 @@ func TestReconcileStreams_CreatesMissingPath(t *testing.T) {
 }
 
 func TestReconcileStreams_SkipsExistingPathWithMatchingConfig(t *testing.T) {
-	r, camRepo, _, _, mtx := newTestReconciler()
+	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", StreamURL: "rtsp://1.2.3.4/stream"},
 	}
-	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:           "cam-cam-1",
 		Source:         "rtsp://1.2.3.4/stream",
 		SourceOnDemand: true,
 		Record:         false,
 	}
 
-	r.reconcileStreams(mtx.pathConfigs)
+	r.reconcileStreams(reader.pathConfigs)
 
-	if len(mtx.addPathCalls) != 0 {
-		t.Errorf("expected 0 AddPath calls (path exists with matching config), got %d", len(mtx.addPathCalls))
+	if len(act.ensurePathCalls) != 0 {
+		t.Errorf("expected 0 EnsurePath calls (path exists with matching config), got %d", len(act.ensurePathCalls))
 	}
-	if len(mtx.deletePathCalls) != 0 {
-		t.Errorf("expected 0 DeletePath calls, got %d", len(mtx.deletePathCalls))
+	if len(act.deletePathCalls) != 0 {
+		t.Errorf("expected 0 DeletePath calls, got %d", len(act.deletePathCalls))
 	}
 	if len(camRepo.updatedIDs) != 0 {
 		t.Errorf("expected no status update, got %v", camRepo.updatedIDs)
@@ -262,29 +259,29 @@ func TestReconcileStreams_SkipsExistingPathWithMatchingConfig(t *testing.T) {
 }
 
 func TestReconcileStreams_DetectsSourceDrift(t *testing.T) {
-	r, camRepo, _, _, mtx := newTestReconciler()
+	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", StreamURL: "rtsp://new-url/stream"},
 	}
 	// MTX has path with OLD source
-	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:           "cam-cam-1",
 		Source:         "rtsp://old-url/stream",
 		SourceOnDemand: true,
 	}
 
-	r.reconcileStreams(mtx.pathConfigs)
+	r.reconcileStreams(reader.pathConfigs)
 
 	// Should delete the stale path
-	if len(mtx.deletePathCalls) != 1 || mtx.deletePathCalls[0] != "cam-cam-1" {
-		t.Fatalf("expected 1 DeletePath call for cam-cam-1, got %v", mtx.deletePathCalls)
+	if len(act.deletePathCalls) != 1 || act.deletePathCalls[0] != "cam-cam-1" {
+		t.Fatalf("expected 1 DeletePath call for cam-cam-1, got %v", act.deletePathCalls)
 	}
 	// Should re-add with new source
-	if len(mtx.addPathCalls) != 1 {
-		t.Fatalf("expected 1 AddPath call, got %d", len(mtx.addPathCalls))
+	if len(act.ensurePathCalls) != 1 {
+		t.Fatalf("expected 1 EnsurePath call, got %d", len(act.ensurePathCalls))
 	}
-	if mtx.addPathCalls[0].cfg.Source != "rtsp://new-url/stream" {
-		t.Errorf("source = %q, want 'rtsp://new-url/stream'", mtx.addPathCalls[0].cfg.Source)
+	if act.ensurePathCalls[0].cfg.Source != "rtsp://new-url/stream" {
+		t.Errorf("source = %q, want 'rtsp://new-url/stream'", act.ensurePathCalls[0].cfg.Source)
 	}
 }
 
@@ -292,25 +289,25 @@ func TestReconcileStreams_DetectsSourceDrift(t *testing.T) {
 // trigger drift detection. sourceOnDemand is dynamically managed by recording logic
 // (false while recording, true otherwise), so reconcileStreams must only compare source URLs.
 func TestReconcileStreams_SkipsSourceOnDemandFalse(t *testing.T) {
-	r, camRepo, _, _, mtx := newTestReconciler()
+	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", StreamURL: "rtsp://1.2.3.4/stream"},
 	}
 	// Source matches, but SourceOnDemand=false (e.g. during recording).
 	// This is NOT drift — reconcileRecording manages sourceOnDemand separately.
-	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:           "cam-cam-1",
 		Source:         "rtsp://1.2.3.4/stream",
 		SourceOnDemand: false,
 	}
 
-	r.reconcileStreams(mtx.pathConfigs)
+	r.reconcileStreams(reader.pathConfigs)
 
-	if len(mtx.deletePathCalls) != 0 {
-		t.Errorf("expected 0 DeletePath calls (sourceOnDemand drift is not checked), got %d", len(mtx.deletePathCalls))
+	if len(act.deletePathCalls) != 0 {
+		t.Errorf("expected 0 DeletePath calls (sourceOnDemand drift is not checked), got %d", len(act.deletePathCalls))
 	}
-	if len(mtx.addPathCalls) != 0 {
-		t.Errorf("expected 0 AddPath calls (sourceOnDemand=false is not drift), got %d", len(mtx.addPathCalls))
+	if len(act.ensurePathCalls) != 0 {
+		t.Errorf("expected 0 EnsurePath calls (sourceOnDemand=false is not drift), got %d", len(act.ensurePathCalls))
 	}
 	if len(camRepo.updatedIDs) != 0 {
 		t.Errorf("expected no status update, got %v", camRepo.updatedIDs)
@@ -318,26 +315,26 @@ func TestReconcileStreams_SkipsSourceOnDemandFalse(t *testing.T) {
 }
 
 func TestReconcileStreams_SkipsDisconnectedCamera(t *testing.T) {
-	r, camRepo, _, _, mtx := newTestReconciler()
+	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", StreamURL: "rtsp://1.2.3.4/stream", Status: "disconnected"},
 	}
 	// MTX still has the path (Disconnect API might have failed to delete it)
-	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:           "cam-cam-1",
 		Source:         "rtsp://1.2.3.4/stream",
 		SourceOnDemand: true,
 	}
 
-	r.reconcileStreams(mtx.pathConfigs)
+	r.reconcileStreams(reader.pathConfigs)
 
 	// Should NOT create a new path for disconnected camera
-	if len(mtx.addPathCalls) != 0 {
-		t.Errorf("expected 0 AddPath calls for disconnected camera, got %d", len(mtx.addPathCalls))
+	if len(act.ensurePathCalls) != 0 {
+		t.Errorf("expected 0 EnsurePath calls for disconnected camera, got %d", len(act.ensurePathCalls))
 	}
 	// Should treat the stale path as orphan and delete it
-	if len(mtx.deletePathCalls) != 1 || mtx.deletePathCalls[0] != "cam-cam-1" {
-		t.Errorf("expected orphan deletion of cam-cam-1, got %v", mtx.deletePathCalls)
+	if len(act.deletePathCalls) != 1 || act.deletePathCalls[0] != "cam-cam-1" {
+		t.Errorf("expected orphan deletion of cam-cam-1, got %v", act.deletePathCalls)
 	}
 	// Should NOT update status
 	if len(camRepo.updatedIDs) != 0 {
@@ -346,48 +343,48 @@ func TestReconcileStreams_SkipsDisconnectedCamera(t *testing.T) {
 }
 
 func TestReconcileStreams_RemovesOrphanPath(t *testing.T) {
-	r, _, _, _, mtx := newTestReconciler()
+	r, _, _, _, reader, act := newTestReconciler()
 	// DB has no cameras, but MTX has orphan cam-* paths
-	mtx.pathConfigs["cam-orphan"] = mediamtx.PathConfigItem{Name: "cam-orphan"}
-	mtx.pathConfigs["cam-ghost"] = mediamtx.PathConfigItem{Name: "cam-ghost"}
+	reader.pathConfigs["cam-orphan"] = mediamtx.PathConfigItem{Name: "cam-orphan"}
+	reader.pathConfigs["cam-ghost"] = mediamtx.PathConfigItem{Name: "cam-ghost"}
 
-	r.reconcileStreams(mtx.pathConfigs)
+	r.reconcileStreams(reader.pathConfigs)
 
-	if len(mtx.deletePathCalls) != 2 {
-		t.Fatalf("expected 2 DeletePath calls, got %d", len(mtx.deletePathCalls))
+	if len(act.deletePathCalls) != 2 {
+		t.Fatalf("expected 2 DeletePath calls, got %d", len(act.deletePathCalls))
 	}
 	deleted := map[string]bool{}
-	for _, name := range mtx.deletePathCalls {
+	for _, name := range act.deletePathCalls {
 		deleted[name] = true
 	}
 	if !deleted["cam-orphan"] || !deleted["cam-ghost"] {
-		t.Errorf("expected cam-orphan and cam-ghost deleted, got %v", mtx.deletePathCalls)
+		t.Errorf("expected cam-orphan and cam-ghost deleted, got %v", act.deletePathCalls)
 	}
 }
 
 func TestReconcileStreams_DoesNotRemoveNonCamPaths(t *testing.T) {
-	r, _, _, _, mtx := newTestReconciler()
-	mtx.pathConfigs["playback-test"] = mediamtx.PathConfigItem{Name: "playback-test"}
-	mtx.pathConfigs["cam-orphan"] = mediamtx.PathConfigItem{Name: "cam-orphan"}
+	r, _, _, _, reader, act := newTestReconciler()
+	reader.pathConfigs["playback-test"] = mediamtx.PathConfigItem{Name: "playback-test"}
+	reader.pathConfigs["cam-orphan"] = mediamtx.PathConfigItem{Name: "cam-orphan"}
 
-	r.reconcileStreams(mtx.pathConfigs)
+	r.reconcileStreams(reader.pathConfigs)
 
-	if len(mtx.deletePathCalls) != 1 {
-		t.Fatalf("expected 1 DeletePath call, got %d", len(mtx.deletePathCalls))
+	if len(act.deletePathCalls) != 1 {
+		t.Fatalf("expected 1 DeletePath call, got %d", len(act.deletePathCalls))
 	}
-	if mtx.deletePathCalls[0] != "cam-orphan" {
-		t.Errorf("expected only cam-orphan deleted, got %q", mtx.deletePathCalls[0])
+	if act.deletePathCalls[0] != "cam-orphan" {
+		t.Errorf("expected only cam-orphan deleted, got %q", act.deletePathCalls[0])
 	}
 }
 
 func TestReconcileStreams_HandlesFindAllError(t *testing.T) {
-	r, camRepo, _, _, mtx := newTestReconciler()
+	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.findAllErr = errors.New("db down")
 
-	r.reconcileStreams(mtx.pathConfigs) // should not panic
+	r.reconcileStreams(reader.pathConfigs) // should not panic
 
-	if len(mtx.addPathCalls) != 0 {
-		t.Error("expected no AddPath calls when FindAll fails")
+	if len(act.ensurePathCalls) != 0 {
+		t.Error("expected no EnsurePath calls when FindAll fails")
 	}
 }
 
@@ -396,7 +393,7 @@ func TestReconcileStreams_HandlesFindAllError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestReconcileRecording_ScheduleStart(t *testing.T) {
-	r, camRepo, schRepo, recRepo, mtx := newTestReconciler()
+	r, camRepo, schRepo, recRepo, _, act := newTestReconciler()
 	weekday := int(time.Now().Weekday())
 
 	camRepo.cams = []model.Camera{
@@ -410,17 +407,17 @@ func TestReconcileRecording_ScheduleStart(t *testing.T) {
 		},
 	}
 
-	r.reconcileRecording(mtx.pathConfigs)
+	r.reconcileRecording(emptyPathConfigs())
 
-	// Should patch record=true
-	if len(mtx.patchPathCalls) != 1 {
-		t.Fatalf("expected 1 PatchPath call, got %d", len(mtx.patchPathCalls))
+	// Should enqueue record on
+	if len(act.setRecordCalls) != 1 {
+		t.Fatalf("expected 1 SetRecord call, got %d", len(act.setRecordCalls))
 	}
-	if mtx.patchPathCalls[0].name != "cam-cam-1" {
-		t.Errorf("patch name = %q", mtx.patchPathCalls[0].name)
+	if act.setRecordCalls[0].path != "cam-cam-1" {
+		t.Errorf("path = %q", act.setRecordCalls[0].path)
 	}
-	if v, ok := mtx.patchPathCalls[0].patch["record"]; !ok || v != true {
-		t.Error("expected record=true")
+	if !act.setRecordCalls[0].on {
+		t.Error("expected SetRecord(on=true)")
 	}
 	// Should create a session with trigger_type=schedule
 	if recRepo.lastCreatedSession == nil {
@@ -442,7 +439,7 @@ func TestReconcileRecording_ScheduleStart(t *testing.T) {
 }
 
 func TestReconcileRecording_ScheduleStop(t *testing.T) {
-	r, camRepo, schRepo, recRepo, mtx := newTestReconciler()
+	r, camRepo, schRepo, recRepo, _, act := newTestReconciler()
 	schID := "sch-1"
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
@@ -462,19 +459,17 @@ func TestReconcileRecording_ScheduleStop(t *testing.T) {
 		{ID: "ses-1", CameraID: "cam-1", TriggerType: "schedule", ScheduleID: &schedIDCopy},
 	}
 
-	r.reconcileRecording(mtx.pathConfigs)
+	r.reconcileRecording(emptyPathConfigs())
 
 	// Time now is almost certainly past 00:01, so should stop
 	foundStop := false
-	for _, call := range mtx.patchPathCalls {
-		if call.name == "cam-cam-1" {
-			if v, ok := call.patch["record"]; ok && v == false {
-				foundStop = true
-			}
+	for _, call := range act.setRecordCalls {
+		if call.path == "cam-cam-1" && !call.on {
+			foundStop = true
 		}
 	}
 	if !foundStop {
-		t.Error("expected record=false patch (schedule stop)")
+		t.Error("expected SetRecord(on=false) for schedule stop")
 	}
 	// Should close the schedule session
 	if recRepo.lastClosedSessionID != "ses-1" {
@@ -487,7 +482,7 @@ func TestReconcileRecording_ScheduleStop(t *testing.T) {
 }
 
 func TestReconcileRecording_ScheduleStopSkippedWhenManualActive(t *testing.T) {
-	r, camRepo, schRepo, recRepo, mtx := newTestReconciler()
+	r, camRepo, schRepo, recRepo, _, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 	}
@@ -505,20 +500,18 @@ func TestReconcileRecording_ScheduleStopSkippedWhenManualActive(t *testing.T) {
 		{ID: "ses-manual", CameraID: "cam-1", TriggerType: "manual"},
 	}
 
-	r.reconcileRecording(mtx.pathConfigs)
+	r.reconcileRecording(emptyPathConfigs())
 
-	// Should NOT patch record=false (manual session active)
-	for _, call := range mtx.patchPathCalls {
-		if call.name == "cam-cam-1" {
-			if v, ok := call.patch["record"]; ok && v == false {
-				t.Error("should not stop recording when manual session is active")
-			}
+	// Should NOT stop recording (manual session active)
+	for _, call := range act.setRecordCalls {
+		if call.path == "cam-cam-1" && !call.on {
+			t.Error("should not stop recording when manual session is active")
 		}
 	}
 }
 
 func TestReconcileRecording_ScheduleAlreadyStarted_NoNewPatch(t *testing.T) {
-	r, camRepo, schRepo, _, mtx := newTestReconciler()
+	r, camRepo, schRepo, _, _, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 	}
@@ -532,17 +525,17 @@ func TestReconcileRecording_ScheduleAlreadyStarted_NoNewPatch(t *testing.T) {
 		},
 	}
 
-	r.reconcileRecording(mtx.pathConfigs)
+	r.reconcileRecording(emptyPathConfigs())
 
-	for _, call := range mtx.patchPathCalls {
-		if call.name == "cam-cam-1" && call.patch["record"] == true {
-			t.Error("should not patch record=true when schedule already started and no drift")
+	for _, call := range act.setRecordCalls {
+		if call.path == "cam-cam-1" && call.on {
+			t.Error("should not enable recording when schedule already started and no drift")
 		}
 	}
 }
 
 func TestReconcileRecording_DriftRecovery(t *testing.T) {
-	r, camRepo, _, recRepo, mtx := newTestReconciler()
+	r, camRepo, _, recRepo, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 	}
@@ -550,44 +543,42 @@ func TestReconcileRecording_DriftRecovery(t *testing.T) {
 	recRepo.activeSessions = []model.RecordingSession{
 		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
 	}
-	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:   "cam-cam-1",
 		Record: false, // drift! session active but not recording
 	}
 
-	r.reconcileRecording(mtx.pathConfigs)
+	r.reconcileRecording(reader.pathConfigs)
 
 	foundRecover := false
-	for _, call := range mtx.patchPathCalls {
-		if call.name == "cam-cam-1" {
-			if v, ok := call.patch["record"]; ok && v == true {
-				foundRecover = true
-			}
+	for _, call := range act.setRecordCalls {
+		if call.path == "cam-cam-1" && call.on {
+			foundRecover = true
 		}
 	}
 	if !foundRecover {
-		t.Error("expected record=true patch for drift recovery")
+		t.Error("expected SetRecord(on=true) for drift recovery")
 	}
 }
 
 func TestReconcileRecording_NoDriftWhenAlreadyRecording(t *testing.T) {
-	r, camRepo, _, recRepo, mtx := newTestReconciler()
+	r, camRepo, _, recRepo, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 	}
 	recRepo.activeSessions = []model.RecordingSession{
 		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
 	}
-	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:   "cam-cam-1",
 		Record: true, // already recording, no drift
 	}
 
-	r.reconcileRecording(mtx.pathConfigs)
+	r.reconcileRecording(reader.pathConfigs)
 
-	for _, call := range mtx.patchPathCalls {
-		if call.name == "cam-cam-1" {
-			t.Error("should not patch when already recording (no drift)")
+	for _, call := range act.setRecordCalls {
+		if call.path == "cam-cam-1" {
+			t.Error("should not enqueue when already recording (no drift)")
 		}
 	}
 }
@@ -596,38 +587,36 @@ func TestReconcileRecording_NoDriftWhenAlreadyRecording(t *testing.T) {
 // reverse-direction repair: a path that is recording (record=true) without any
 // active session or in-window schedule is stopped after being observed for
 // orphanRecordConfirmTicks consecutive cycles. This is the safety net that
-// completes a stop whose MediaMTX patch failed after the session was closed.
+// completes a stop whose MediaMTX apply failed after the session was closed.
 func TestReconcileRecording_OrphanRecordingStoppedAfterHysteresis(t *testing.T) {
-	r, camRepo, _, _, mtx := newTestReconciler()
+	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 	}
 	// No sessions, no schedules — but MediaMTX is recording.
-	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:   "cam-cam-1",
 		Record: true,
 	}
 
 	// First observation: suspected, but not yet acted upon (hysteresis).
-	r.reconcileRecording(mtx.pathConfigs)
-	for _, call := range mtx.patchPathCalls {
-		if call.name == "cam-cam-1" && call.patch["record"] == false {
+	r.reconcileRecording(reader.pathConfigs)
+	for _, call := range act.setRecordCalls {
+		if call.path == "cam-cam-1" && !call.on {
 			t.Fatal("should not stop orphan recording on first observation")
 		}
 	}
 
 	// Second consecutive observation: force stop.
-	r.reconcileRecording(mtx.pathConfigs)
+	r.reconcileRecording(reader.pathConfigs)
 	foundStop := false
-	for _, call := range mtx.patchPathCalls {
-		if call.name == "cam-cam-1" {
-			if v, ok := call.patch["record"]; ok && v == false {
-				foundStop = true
-			}
+	for _, call := range act.setRecordCalls {
+		if call.path == "cam-cam-1" && !call.on {
+			foundStop = true
 		}
 	}
 	if !foundStop {
-		t.Error("expected record=false patch for orphan recording after hysteresis")
+		t.Error("expected SetRecord(on=false) for orphan recording after hysteresis")
 	}
 }
 
@@ -635,23 +624,23 @@ func TestReconcileRecording_OrphanRecordingStoppedAfterHysteresis(t *testing.T) 
 // recording backed by an active session is never treated as orphan, no matter
 // how many cycles pass.
 func TestReconcileRecording_OrphanNotStoppedWhenSessionActive(t *testing.T) {
-	r, camRepo, _, recRepo, mtx := newTestReconciler()
+	r, camRepo, _, recRepo, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 	}
 	recRepo.activeSessions = []model.RecordingSession{
 		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
 	}
-	mtx.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:   "cam-cam-1",
 		Record: true,
 	}
 
 	for i := 0; i < 3; i++ {
-		r.reconcileRecording(mtx.pathConfigs)
+		r.reconcileRecording(reader.pathConfigs)
 	}
-	for _, call := range mtx.patchPathCalls {
-		if call.name == "cam-cam-1" && call.patch["record"] == false {
+	for _, call := range act.setRecordCalls {
+		if call.path == "cam-cam-1" && !call.on {
 			t.Error("must not stop recording that has an active session")
 		}
 	}
@@ -662,19 +651,19 @@ func TestReconcileRecording_OrphanNotStoppedWhenSessionActive(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestReconcile_MTXDown_SkipsAll(t *testing.T) {
-	r, camRepo, _, _, mtx := newTestReconciler()
+	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", StreamURL: "rtsp://1.2.3.4/stream"},
 	}
-	mtx.healthErr = errors.New("connection refused")
+	reader.healthErr = errors.New("connection refused")
 
 	r.reconcile()
 
-	if len(mtx.addPathCalls) != 0 {
-		t.Error("expected no AddPath calls when MTX is down")
+	if len(act.ensurePathCalls) != 0 {
+		t.Error("expected no EnsurePath calls when MTX is down")
 	}
-	if len(mtx.patchPathCalls) != 0 {
-		t.Error("expected no PatchPath calls when MTX is down")
+	if len(act.setRecordCalls) != 0 {
+		t.Error("expected no SetRecord calls when MTX is down")
 	}
 	if !r.mtxDown {
 		t.Error("expected mtxDown=true after health check failure")
@@ -682,24 +671,24 @@ func TestReconcile_MTXDown_SkipsAll(t *testing.T) {
 }
 
 func TestReconcile_MTXRecovers_FullReconcile(t *testing.T) {
-	r, camRepo, _, _, mtx := newTestReconciler()
+	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", StreamURL: "rtsp://1.2.3.4/stream"},
 	}
 
 	// First reconcile: MTX is down
-	mtx.healthErr = errors.New("connection refused")
+	reader.healthErr = errors.New("connection refused")
 	r.reconcile()
 	if !r.mtxDown {
 		t.Fatal("expected mtxDown=true after first reconcile")
 	}
 
 	// Second reconcile: MTX recovered
-	mtx.healthErr = nil
+	reader.healthErr = nil
 	r.reconcile()
 
-	if len(mtx.addPathCalls) != 1 {
-		t.Fatalf("expected 1 AddPath call after MTX recovery, got %d", len(mtx.addPathCalls))
+	if len(act.ensurePathCalls) != 1 {
+		t.Fatalf("expected 1 EnsurePath call after MTX recovery, got %d", len(act.ensurePathCalls))
 	}
 	if r.mtxDown {
 		t.Error("expected mtxDown=false after recovery")
@@ -711,7 +700,7 @@ func TestReconcile_MTXRecovers_FullReconcile(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestReconcileCameraStatus_SkipsDisconnected(t *testing.T) {
-	r, camRepo, _, _, _ := newTestReconciler()
+	r, camRepo, _, _, _, _ := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", IP: "192.0.2.1", Port: 554, Status: "disconnected"},
 	}
@@ -725,7 +714,7 @@ func TestReconcileCameraStatus_SkipsDisconnected(t *testing.T) {
 }
 
 func TestReconcileCameraStatus_SkipsError(t *testing.T) {
-	r, camRepo, _, _, _ := newTestReconciler()
+	r, camRepo, _, _, _, _ := newTestReconciler()
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", IP: "192.0.2.1", Port: 554, Status: "error"},
 	}
@@ -739,7 +728,7 @@ func TestReconcileCameraStatus_SkipsError(t *testing.T) {
 }
 
 func TestReconcileCameraStatus_ConnectingDoesNotUpdateOffline(t *testing.T) {
-	r, camRepo, _, _, _ := newTestReconciler()
+	r, camRepo, _, _, _, _ := newTestReconciler()
 	// Camera in "connecting" state, probing an unreachable IP → would return "offline"
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", IP: "192.0.2.1", Port: 554, Status: "connecting"},
@@ -754,7 +743,7 @@ func TestReconcileCameraStatus_ConnectingDoesNotUpdateOffline(t *testing.T) {
 }
 
 func TestReconcileCameraStatus_ConnectingUpdatesToOnline(t *testing.T) {
-	r, camRepo, _, _, _ := newTestReconciler()
+	r, camRepo, _, _, _, _ := newTestReconciler()
 	// Start a local listener so probe returns "online"
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -779,7 +768,7 @@ func TestReconcileCameraStatus_ConnectingUpdatesToOnline(t *testing.T) {
 }
 
 func TestReconcileCameraStatus_OnlineToOfflineTransition(t *testing.T) {
-	r, camRepo, _, _, _ := newTestReconciler()
+	r, camRepo, _, _, _, _ := newTestReconciler()
 	// Camera was "online", probe unreachable IP → should transition to "offline"
 	camRepo.cams = []model.Camera{
 		{ID: "cam-1", IP: "192.0.2.1", Port: 554, Status: "online"},
@@ -865,13 +854,13 @@ func TestProbeCamera_OnlineForLocalListener(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestReconcilerStop(t *testing.T) {
-	r, _, _, _, _ := newTestReconciler()
+	r, _, _, _, _, _ := newTestReconciler()
 	r.Stop()
 	r.Stop() // double stop should not panic
 }
 
 func TestReconcilerStopIdempotent(t *testing.T) {
-	r, _, _, _, _ := newTestReconciler()
+	r, _, _, _, _, _ := newTestReconciler()
 
 	done := make(chan struct{})
 	go func() {
@@ -895,4 +884,10 @@ func TestReconcilerStopIdempotent(t *testing.T) {
 
 func weekdayStr(day int) string {
 	return strconv.Itoa(day)
+}
+
+// emptyPathConfigs returns an empty path-config map for tests that only
+// exercise schedule/session logic.
+func emptyPathConfigs() map[string]mediamtx.PathConfigItem {
+	return make(map[string]mediamtx.PathConfigItem)
 }

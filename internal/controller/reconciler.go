@@ -38,12 +38,20 @@ type RecordingRepo interface {
 	CloseSession(id string, endTime time.Time) error
 }
 
-type MediaMTXClient interface {
-	AddPath(name string, cfg mediamtx.PathConfig) error
-	DeletePath(name string) error
-	PatchPath(name string, patch map[string]any) error
+// MTXReader is the read-only MediaMTX surface the reconciler uses to observe
+// actual state. Reads never mutate, so they bypass the actuator.
+type MTXReader interface {
 	ListPathConfigs() (map[string]mediamtx.PathConfigItem, error)
 	HealthCheck() error
+}
+
+// MTXActuator is the write surface: every mutation is enqueued to the
+// actuator (single writer, serial execution, retried). The reconciler never
+// blocks on MediaMTX availability — all methods are fire-and-forget.
+type MTXActuator interface {
+	EnqueueEnsurePath(name string, cfg mediamtx.PathConfig)
+	EnqueueDeletePath(name string)
+	EnqueueSetRecord(path string, on bool)
 }
 
 // ---------------------------------------------------------------------------
@@ -77,13 +85,17 @@ type Reconciler struct {
 	camRepo CameraRepo
 	schRepo ScheduleRepo
 	recRepo RecordingRepo
-	mtx     MediaMTXClient
+	reader  MTXReader
+	act     MTXActuator
 
 	recordPath     string
 	segmentDuration string
 
 	mtxDown      bool
 	probeCounter int
+	// sawCamPaths tracks whether cam-* paths existed on MediaMTX previously;
+	// used to log a one-shot warning when they all vanish (MediaMTX restart).
+	sawCamPaths bool
 	// orphanRecordTicks counts consecutive observations of orphan recording
 	// state per MediaMTX path (see orphanRecordConfirmTicks). Accessed only
 	// from the single reconcile loop, so no locking is needed.
@@ -96,14 +108,16 @@ func NewReconciler(
 	camRepo CameraRepo,
 	schRepo ScheduleRepo,
 	recRepo RecordingRepo,
-	mtx MediaMTXClient,
+	reader MTXReader,
+	act MTXActuator,
 	recordPath, segmentDuration string,
 ) *Reconciler {
 	return &Reconciler{
 		camRepo:           camRepo,
 		schRepo:           schRepo,
 		recRepo:           recRepo,
-		mtx:               mtx,
+		reader:            reader,
+		act:               act,
 		recordPath:        recordPath,
 		segmentDuration:   segmentDuration,
 		orphanRecordTicks: make(map[string]int),
@@ -137,7 +151,7 @@ func (r *Reconciler) reconcile() {
 	metrics.ReconcileCycleTotal.Inc()
 
 	// 1. Check MediaMTX health
-	if err := r.mtx.HealthCheck(); err != nil {
+	if err := r.reader.HealthCheck(); err != nil {
 		metrics.MediaMTXUp.Set(0)
 		if !r.mtxDown {
 			logger.Warnf("reconciler: mediamtx is down: %v", err)
@@ -152,7 +166,7 @@ func (r *Reconciler) reconcile() {
 	}
 
 	// 2. Fetch MediaMTX path configs once (shared by sub-reconcilers)
-	mtxConfigs, err := r.mtx.ListPathConfigs()
+	mtxConfigs, err := r.reader.ListPathConfigs()
 	if err != nil {
 		logger.Errorf("reconciler: list mediamtx configs: %v", err)
 		return
@@ -226,6 +240,25 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 		return
 	}
 
+	// Detect MediaMTX restart: cameras exist in DB but no cam-* path survived.
+	// reconcileStreams re-registers everything below anyway; this just makes
+	// the event explicit in logs instead of silent churn.
+	hasCamPaths := false
+	for name := range mtxConfigs {
+		if strings.HasPrefix(name, "cam-") {
+			hasCamPaths = true
+			break
+		}
+	}
+	if len(cams) > 0 && !hasCamPaths {
+		if r.sawCamPaths {
+			logger.Warnf("reconcile streams: all cam-* paths vanished while %d cameras exist — mediamtx likely restarted, re-registering all paths", len(cams))
+		}
+		r.sawCamPaths = false
+	} else if hasCamPaths {
+		r.sawCamPaths = true
+	}
+
 	// Ensure all DB cameras have paths with correct config
 	dbPaths := make(map[string]bool, len(cams))
 	for _, cam := range cams {
@@ -246,25 +279,20 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 			if existing.Source == cam.StreamURL {
 				continue // source matches, nothing to do
 			}
-			// Source changed — delete and re-add
+			// Source changed — delete and re-add. The actuator serializes
+			// per-path mutations, so the ensure lands after the delete.
 			logger.Warnf("reconcile streams: drift detected for %s (source %q -> %q)",
 				cam.MediaMTXPath, existing.Source, cam.StreamURL)
-			if err := r.mtx.DeletePath(cam.MediaMTXPath); err != nil {
-				logger.Warnf("reconcile streams: delete stale path %s: %v", cam.MediaMTXPath, err)
-				continue
-			}
+			r.act.EnqueueDeletePath(cam.MediaMTXPath)
 		}
 
-		if err := r.mtx.AddPath(cam.MediaMTXPath, mediamtx.PathConfig{
+		r.act.EnqueueEnsurePath(cam.MediaMTXPath, mediamtx.PathConfig{
 			Source:                cam.StreamURL,
 			SourceOnDemand:        true,
 			RecordPath:            r.recordPath + "/%path/%Y-%m-%d_%H-%M-%S",
 			RecordSegmentDuration: r.segmentDuration,
-		}); err != nil {
-			logger.Warnf("reconcile streams: add path %s for camera %s: %v", cam.MediaMTXPath, cam.ID, err)
-		} else {
-			logger.Infof("reconcile streams: created path %s for camera %s", cam.MediaMTXPath, cam.ID)
-		}
+		})
+		logger.Infof("reconcile streams: ensured path %s for camera %s", cam.MediaMTXPath, cam.ID)
 		_ = r.camRepo.UpdateStatus(cam.ID, "connecting")
 	}
 
@@ -274,11 +302,8 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 			continue
 		}
 		if !dbPaths[name] {
-			if err := r.mtx.DeletePath(name); err != nil {
-				logger.Warnf("reconcile streams: remove orphan path %s: %v", name, err)
-			} else {
-				logger.Infof("reconcile streams: removed orphan path %s", name)
-			}
+			r.act.EnqueueDeletePath(name)
+			logger.Infof("reconcile streams: queued removal of orphan path %s", name)
 		}
 	}
 }
@@ -336,14 +361,10 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 
 		switch {
 		case inWindow && sch.LastAction != "start":
-			// Start recording (also disable sourceOnDemand so MediaMTX pulls stream actively)
-			if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
-				"record":         true,
-				"sourceOnDemand": false,
-			}); err != nil {
-				logger.Errorf("reconcile recording: start schedule %s: %v", sch.ID, err)
-				continue
-			}
+			// Intent first: enqueue record-on, then persist the session. The
+			// actuator retries until applied, and drift recovery re-applies if
+			// the state is ever lost — so no rollback dance is needed here.
+			r.act.EnqueueSetRecord(cam.MediaMTXPath, true)
 			sess := &model.RecordingSession{
 				ID:          uuid.NewString(),
 				CameraID:    cam.ID,
@@ -379,10 +400,7 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 				}
 			}
 			if !manualActive {
-				_ = r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
-					"record":         false,
-					"sourceOnDemand": true,
-				})
+				r.act.EnqueueSetRecord(cam.MediaMTXPath, false)
 			}
 			sch.LastAction = "stop"
 			_ = r.schRepo.Update(sch)
@@ -415,13 +433,7 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 
 		if !actualRecording {
 			// Active session exists but MediaMTX not recording — re-apply
-			if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
-				"record":         true,
-				"sourceOnDemand": false,
-			}); err != nil {
-				logger.Errorf("reconcile recording: recover session %s camera %s: %v", sess.ID, sess.CameraID, err)
-				continue
-			}
+			r.act.EnqueueSetRecord(cam.MediaMTXPath, true)
 			restored++
 			metrics.DriftEvents.WithLabelValues("forward").Inc()
 			logger.Warnf("reconcile recording: recovered session %s camera %s (drift)", sess.ID, sess.CameraID)
@@ -469,13 +481,7 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 				cam.MediaMTXPath, r.orphanRecordTicks[cam.MediaMTXPath], orphanRecordConfirmTicks)
 			continue
 		}
-		if err := r.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
-			"record":         false,
-			"sourceOnDemand": true,
-		}); err != nil {
-			logger.Errorf("reconcile recording: stop orphan recording on %s: %v", cam.MediaMTXPath, err)
-			continue
-		}
+		r.act.EnqueueSetRecord(cam.MediaMTXPath, false)
 		delete(r.orphanRecordTicks, cam.MediaMTXPath)
 		metrics.DriftEvents.WithLabelValues("reverse").Inc()
 		logger.Warnf("reconcile recording: stopped orphan recording on %s (no active session or schedule)", cam.MediaMTXPath)

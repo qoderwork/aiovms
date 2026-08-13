@@ -150,17 +150,14 @@ func (m *mockCameraSvc) Get(ctx context.Context, tenantID int64, id string) (*mo
 	return c, nil
 }
 
-type mockMTX struct {
-	patchPathCalls []struct{ name string; patch map[string]any }
-	patchPathErr   error
+type mockActuator struct {
+	setRecordCalls []struct{ path string; on bool }
+	setRecordErr   error
 }
 
-func (m *mockMTX) PatchPath(name string, patch map[string]any) error {
-	m.patchPathCalls = append(m.patchPathCalls, struct {
-		name  string
-		patch map[string]any
-	}{name, patch})
-	return m.patchPathErr
+func (m *mockActuator) SetRecord(path string, on bool) error {
+	m.setRecordCalls = append(m.setRecordCalls, struct{ path string; on bool }{path, on})
+	return m.setRecordErr
 }
 
 // --- tests ---
@@ -170,7 +167,7 @@ func TestRecordingList(t *testing.T) {
 	repo.recs["r1"] = &model.Recording{ID: "r1", CameraID: "cam-1"}
 	repo.recs["r2"] = &model.Recording{ID: "r2", CameraID: "cam-1"}
 
-	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, act: &mockActuator{}}
 	recs, total, err := svc.List(context.Background(), 0, "", "", "", 1, 10)
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -188,7 +185,7 @@ func TestRecordingGet(t *testing.T) {
 	repo.recs["r1"] = &model.Recording{
 		ID: "r1", CameraID: "cam-1", MediaMTXPath: "cam-1", Filename: "test.mp4",
 	}
-	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, act: &mockActuator{}}
 
 	rec, playURL, err := svc.Get(context.Background(), 0, "r1")
 	if err != nil {
@@ -204,7 +201,7 @@ func TestRecordingGet(t *testing.T) {
 
 func TestRecordingGetNotFound(t *testing.T) {
 	repo := newMockRepo()
-	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, act: &mockActuator{}}
 	_, _, err := svc.Get(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -216,7 +213,7 @@ func TestRecordingGetNotFound(t *testing.T) {
 func TestRecordingGetCrossTenantForbidden(t *testing.T) {
 	repo := newMockRepo()
 	repo.recs["r1"] = &model.Recording{ID: "r1", CameraID: "cam-1", LicenseID: 100}
-	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, act: &mockActuator{}}
 	_, _, err := svc.Get(context.Background(), 200, "r1")
 	if err == nil {
 		t.Fatal("expected forbidden error, got nil")
@@ -230,7 +227,7 @@ func TestRecordingGetCrossTenantForbidden(t *testing.T) {
 func TestRecordingDelete(t *testing.T) {
 	repo := newMockRepo()
 	repo.recs["r1"] = &model.Recording{ID: "r1", CameraID: "cam-1", FilePath: "/tmp/test.mp4"}
-	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, act: &mockActuator{}}
 
 	err := svc.Delete(context.Background(), 0, "r1")
 	if err != nil {
@@ -246,7 +243,7 @@ func TestRecordingDelete(t *testing.T) {
 
 func TestRecordingDeleteNotFound(t *testing.T) {
 	repo := newMockRepo()
-	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, act: &mockActuator{}}
 	err := svc.Delete(context.Background(), 0, "no-such-id")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -258,7 +255,7 @@ func TestRecordingDeleteNotFound(t *testing.T) {
 func TestRecordingDeleteCrossTenantForbidden(t *testing.T) {
 	repo := newMockRepo()
 	repo.recs["r1"] = &model.Recording{ID: "r1", CameraID: "cam-1", LicenseID: 100}
-	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, act: &mockActuator{}}
 	err := svc.Delete(context.Background(), 200, "r1")
 	if err == nil {
 		t.Fatal("expected forbidden error, got nil")
@@ -275,22 +272,22 @@ func TestRecordingStartManual(t *testing.T) {
 			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 		},
 	}
-	mtx := &mockMTX{}
-	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
+	act := &mockActuator{}
+	svc := &service{repo: repo, camSvc: camSvc, act: act}
 
 	err := svc.StartManual(context.Background(), 1, "cam-1")
 	if err != nil {
 		t.Fatalf("StartManual: %v", err)
 	}
-	if len(mtx.patchPathCalls) != 1 {
-		t.Fatalf("expected 1 PatchPath call, got %d", len(mtx.patchPathCalls))
+	if len(act.setRecordCalls) != 1 {
+		t.Fatalf("expected 1 SetRecord call, got %d", len(act.setRecordCalls))
 	}
-	call := mtx.patchPathCalls[0]
-	if call.name != "cam-cam-1" {
-		t.Errorf("patch name = %q, want 'cam-cam-1'", call.name)
+	call := act.setRecordCalls[0]
+	if call.path != "cam-cam-1" {
+		t.Errorf("path = %q, want 'cam-cam-1'", call.path)
 	}
-	if v, ok := call.patch["record"]; !ok || v != true {
-		t.Error("expected patch record=true")
+	if !call.on {
+		t.Error("expected SetRecord(on=true)")
 	}
 	// Session should be created with trigger_type=manual and no end_time.
 	if repo.lastCreatedSession == nil {
@@ -307,7 +304,7 @@ func TestRecordingStartManual(t *testing.T) {
 func TestRecordingStartManualCameraNotFound(t *testing.T) {
 	repo := newMockRepo()
 	camSvc := &mockCameraSvc{cams: make(map[string]*model.Camera)}
-	svc := &service{repo: repo, camSvc: camSvc, mtx: &mockMTX{}}
+	svc := &service{repo: repo, camSvc: camSvc, act: &mockActuator{}}
 
 	err := svc.StartManual(context.Background(), 1, "cam-1")
 	if err == nil {
@@ -324,15 +321,15 @@ func TestRecordingStartManualCrossTenant(t *testing.T) {
 			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 		},
 	}
-	mtx := &mockMTX{}
-	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
+	act := &mockActuator{}
+	svc := &service{repo: repo, camSvc: camSvc, act: act}
 
 	err := svc.StartManual(context.Background(), 2, "cam-1")
 	if err == nil {
 		t.Fatal("expected error for cross-tenant camera, got nil")
 	}
-	if len(mtx.patchPathCalls) != 0 {
-		t.Errorf("expected no PatchPath call on cross-tenant start, got %d", len(mtx.patchPathCalls))
+	if len(act.setRecordCalls) != 0 {
+		t.Errorf("expected no SetRecord call on cross-tenant start, got %d", len(act.setRecordCalls))
 	}
 	if repo.lastCreatedSession != nil {
 		t.Error("expected no session created on cross-tenant start")
@@ -349,18 +346,18 @@ func TestRecordingStopManual(t *testing.T) {
 			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1"},
 		},
 	}
-	mtx := &mockMTX{}
-	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
+	act := &mockActuator{}
+	svc := &service{repo: repo, camSvc: camSvc, act: act}
 
 	err := svc.StopManual(context.Background(), 0, "cam-1")
 	if err != nil {
 		t.Fatalf("StopManual: %v", err)
 	}
-	if len(mtx.patchPathCalls) != 1 {
-		t.Fatalf("expected 1 PatchPath call, got %d", len(mtx.patchPathCalls))
+	if len(act.setRecordCalls) != 1 {
+		t.Fatalf("expected 1 SetRecord call, got %d", len(act.setRecordCalls))
 	}
-	if v, ok := mtx.patchPathCalls[0].patch["record"]; !ok || v != false {
-		t.Error("expected patch record=false")
+	if act.setRecordCalls[0].on {
+		t.Error("expected SetRecord(on=false)")
 	}
 	if repo.lastClosedSessionID != "ses-1" {
 		t.Errorf("expected session ses-1 closed, got %q", repo.lastClosedSessionID)
@@ -381,8 +378,8 @@ func TestRecordingStopManualClosesSessionEvenIfPatchFails(t *testing.T) {
 			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1"},
 		},
 	}
-	mtx := &mockMTX{patchPathErr: errors.New("mediamtx down")}
-	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
+	act := &mockActuator{setRecordErr: errors.New("mediamtx down")}
+	svc := &service{repo: repo, camSvc: camSvc, act: act}
 
 	err := svc.StopManual(context.Background(), 0, "cam-1")
 	if err == nil {
@@ -405,23 +402,23 @@ func TestRecordingStopManualNoSessionStillPatches(t *testing.T) {
 			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1"},
 		},
 	}
-	mtx := &mockMTX{}
-	svc := &service{repo: repo, camSvc: camSvc, mtx: mtx}
+	act := &mockActuator{}
+	svc := &service{repo: repo, camSvc: camSvc, act: act}
 
 	if err := svc.StopManual(context.Background(), 0, "cam-1"); err != nil {
 		t.Fatalf("StopManual: %v", err)
 	}
-	if len(mtx.patchPathCalls) != 1 {
-		t.Fatalf("expected 1 PatchPath call, got %d", len(mtx.patchPathCalls))
+	if len(act.setRecordCalls) != 1 {
+		t.Fatalf("expected 1 SetRecord call, got %d", len(act.setRecordCalls))
 	}
-	if v, ok := mtx.patchPathCalls[0].patch["record"]; !ok || v != false {
-		t.Error("expected patch record=false")
+	if act.setRecordCalls[0].on {
+		t.Error("expected SetRecord(on=false)")
 	}
 }
 
 func TestRecordingUpsert(t *testing.T) {
 	repo := newMockRepo()
-	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, mtx: &mockMTX{}}
+	svc := &service{repo: repo, camSvc: &mockCameraSvc{}, act: &mockActuator{}}
 	rec := &model.Recording{
 		CameraID:  "cam-1",
 		Filename:  "2024-01-01_10-00-00.mp4",

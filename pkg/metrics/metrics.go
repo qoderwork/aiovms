@@ -70,6 +70,25 @@ var (
 		},
 		[]string{"direction"},
 	)
+
+	// ActuatorCommandsTotal — 执行器命令执行结果计数（按命令类型/结果分维）。
+	// result=ok 成功；failed 重试耗尽后放弃；dropped 队列满被丢弃。
+	ActuatorCommandsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "vms_actuator_commands_total",
+			Help: "MediaMTX actuator commands by kind and result (ok/failed/dropped).",
+		},
+		[]string{"kind", "result"},
+	)
+
+	// ActuatorQueueDepth — 执行器待执行命令数。持续大于 0 说明 MediaMTX
+	// 不可达或执行速度跟不上入队速度。
+	ActuatorQueueDepth = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "vms_actuator_queue_depth",
+			Help: "Number of commands pending in the MediaMTX actuator queue.",
+		},
+	)
 )
 
 func init() {
@@ -81,5 +100,7 @@ func init() {
 		ReconcileCycleTotal,
 		RecordingsTotal,
 		DriftEvents,
+		ActuatorCommandsTotal,
+		ActuatorQueueDepth,
 	)
 }

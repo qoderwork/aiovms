@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"aiovms/internal/mediamtx"
 	"aiovms/internal/model"
 	"aiovms/pkg/apperror"
 	"aiovms/pkg/logger"
@@ -23,23 +22,25 @@ type Service interface {
 	Upsert(ctx context.Context, rec *model.Recording) error
 }
 
-// mediaMTXClient abstracts MediaMTX API for testability.
-type mediaMTXClient interface {
-	PatchPath(name string, patch map[string]any) error
+// recordActuator abstracts the MediaMTX actuator (single writer) for
+// testability. Recording control is the only MediaMTX mutation this service
+// performs; the actuator applies it serially with retries.
+type recordActuator interface {
+	SetRecord(path string, on bool) error
 }
 
 type service struct {
 	repo   Repository
 	camSvc CameraService
-	mtx    mediaMTXClient
+	act    recordActuator
 }
 
 type CameraService interface {
 	Get(ctx context.Context, tenantID int64, id string) (*model.Camera, error)
 }
 
-func NewService(repo Repository, camSvc CameraService, mtx *mediamtx.Client) Service {
-	return &service{repo: repo, camSvc: camSvc, mtx: mtx}
+func NewService(repo Repository, camSvc CameraService, act recordActuator) Service {
+	return &service{repo: repo, camSvc: camSvc, act: act}
 }
 
 func (s *service) List(ctx context.Context, tenantID int64, cameraID, startTime, endTime string, page, pageSize int) ([]model.Recording, int64, error) {
@@ -109,13 +110,11 @@ func (s *service) StartManual(ctx context.Context, tenantID int64, cameraID stri
 		_ = s.repo.CloseSession(existing.ID, time.Now())
 	}
 
-	// 1. Patch MediaMTX first: if it fails, we don't create a dangling session.
-//    注意：一期录像始终使用主码流（cam.MediaMTXPath），stream_type 暂不生效。
-//    同时关闭 sourceOnDemand，确保 MediaMTX 主动拉流录像，不依赖有人预览。
-	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
-		"record":          true,
-		"sourceOnDemand":  false,
-	}); err != nil {
+	// 1. Enable recording first (via actuator; waits for apply): if it fails,
+	//    we don't create a dangling session.
+	//    注意：一期录像始终使用主码流（cam.MediaMTXPath），stream_type 暂不生效。
+	//    SetRecord 同时关闭 sourceOnDemand，确保 MediaMTX 主动拉流录像，不依赖有人预览。
+	if err := s.act.SetRecord(cam.MediaMTXPath, true); err != nil {
 		return err
 	}
 
@@ -133,10 +132,7 @@ func (s *service) StartManual(ctx context.Context, tenantID int64, cameraID stri
 	if err := s.repo.CreateSession(sess); err != nil {
 		// Best-effort rollback: disable recording to avoid a recording without a session.
 		logger.Errorf("start manual: create session for camera %s: %v (rolling back mediamtx)", cameraID, err)
-		_ = s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
-			"record":         false,
-			"sourceOnDemand": true,
-		})
+		_ = s.act.SetRecord(cam.MediaMTXPath, false)
 		return apperror.Wrap(err, 50000, 500, "failed to create recording session")
 	}
 	return nil
@@ -165,11 +161,8 @@ func (s *service) StopManual(ctx context.Context, tenantID int64, cameraID strin
 
 	// 2. Stop MediaMTX recording (idempotent: safe even if not recording).
 	//    恢复 sourceOnDemand=true，无人预览时停止拉流节省资源。
-	if err := s.mtx.PatchPath(cam.MediaMTXPath, map[string]any{
-		"record":         false,
-		"sourceOnDemand": true,
-	}); err != nil {
-		// Session already closed. If the patch fails, the reconciler's orphan-record
+	if err := s.act.SetRecord(cam.MediaMTXPath, false); err != nil {
+		// Session already closed. If the apply fails, the reconciler's orphan-record
 		// repair will stop recording on a later cycle, so no retry loop is needed here.
 		return err
 	}

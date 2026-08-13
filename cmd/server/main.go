@@ -107,23 +107,31 @@ func main() {
 		logger.Warnf("mediaMTX health check: %v", err)
 	}
 
+	// 7. Start MediaMTX actuator — the single writer for all MTX mutations.
+	//    Services and the reconciler enqueue intent; the actuator applies it
+	//    serially with retries, so MTX state always converges to DB intent.
+	actuator := controller.NewActuator(mtxClient)
+
 	// 8. Bootstrap layers
 	camRepo := camera.NewRepository(db)
 	cameraSvc := camera.NewService(camRepo, mtxClient, cfg.Recording.Path, cfg.Recording.SegmentDuration)
 
 	recRepo := recording.NewRepository(db)
-	recSvc := recording.NewService(recRepo, cameraSvc, mtxClient)
+	recSvc := recording.NewService(recRepo, cameraSvc, actuator)
 
 	schRepo := schedule.NewRepository(db)
 	schSvc := schedule.NewService(schRepo)
 
 	// 9. Start unified reconciler (replaces startup sync, cron triggerJob,
 	//    event-driven MTX recovery, and camera status checker).
-	reconciler := controller.NewReconciler(camRepo, schRepo, recRepo, mtxClient,
+	reconciler := controller.NewReconciler(camRepo, schRepo, recRepo, mtxClient, actuator,
 		cfg.Recording.Path, cfg.Recording.SegmentDuration)
 
 	// 10. Start background workers
 	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() { defer wg.Done(); actuator.Run() }()
 
 	wg.Add(1)
 	go func() { defer wg.Done(); reconciler.Run() }()
@@ -222,9 +230,10 @@ func main() {
 		logger.Errorf("server shutdown: %v", err)
 	}
 
-	reconciler.Stop()
+	reconciler.Stop() // stop enqueueing new commands first
 	recScanner.Stop()
 	retention.Stop()
+	actuator.Stop() // then drain/stop the writer
 
 	wg.Wait()
 	logger.Info("server stopped")
