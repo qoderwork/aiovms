@@ -155,15 +155,13 @@ type mockActuator struct {
 		path string
 		on   bool
 	}
-	setRecordErr error
 }
 
-func (m *mockActuator) SetRecord(path string, on bool) error {
+func (m *mockActuator) EnqueueSetRecord(path string, on bool) {
 	m.setRecordCalls = append(m.setRecordCalls, struct {
 		path string
 		on   bool
 	}{path, on})
-	return m.setRecordErr
 }
 
 // --- tests ---
@@ -370,11 +368,13 @@ func TestRecordingStopManual(t *testing.T) {
 	}
 }
 
-// TestRecordingStopManualClosesSessionEvenIfPatchFails is a regression test
-// for the stop race: the session (desired state) must be closed BEFORE the
-// MediaMTX stop patch, otherwise the reconciler's drift recovery re-enables
-// record:true while the session is still open and the stop is silently undone.
-func TestRecordingStopManualClosesSessionEvenIfPatchFails(t *testing.T) {
+// TestRecordingStopManualIntentCommit pins the intent-commit contract: the
+// stop succeeds once the session is closed. The MediaMTX apply is async and
+// its outcome never surfaces as an API error — convergence is the
+// reconciler's job (orphan repair), observable via vms_drift_events_total.
+// This replaced the old "error when patch fails" test: that behavior was a
+// semantic bug (spurious "stop failed" while the stop was converging).
+func TestRecordingStopManualIntentCommit(t *testing.T) {
 	repo := newMockRepo()
 	repo.activeSessions = []model.RecordingSession{
 		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
@@ -384,17 +384,19 @@ func TestRecordingStopManualClosesSessionEvenIfPatchFails(t *testing.T) {
 			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1"},
 		},
 	}
-	act := &mockActuator{setRecordErr: errors.New("mediamtx down")}
+	act := &mockActuator{}
 	svc := &service{repo: repo, camSvc: camSvc, act: act}
 
-	err := svc.StopManual(context.Background(), 0, "cam-1")
-	if err == nil {
-		t.Fatal("expected error when MediaMTX patch fails")
+	if err := svc.StopManual(context.Background(), 0, "cam-1"); err != nil {
+		t.Fatalf("StopManual must not fail on MTX apply issues: %v", err)
 	}
-	// Session must already be closed so the reconciler will not re-enable
-	// recording; its orphan-record repair finishes the stop later.
+	// Session closed = stop committed.
 	if repo.lastClosedSessionID != "ses-1" {
-		t.Errorf("expected session ses-1 closed despite patch failure, got %q", repo.lastClosedSessionID)
+		t.Errorf("expected session ses-1 closed, got %q", repo.lastClosedSessionID)
+	}
+	// Stop command still enqueued for MTX convergence.
+	if len(act.setRecordCalls) != 1 || act.setRecordCalls[0].on {
+		t.Errorf("expected record-off enqueued, got %+v", act.setRecordCalls)
 	}
 }
 

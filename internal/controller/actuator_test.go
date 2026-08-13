@@ -237,3 +237,73 @@ func TestActuatorQueueFullDrops(t *testing.T) {
 		t.Fatal("dropped command waiter not notified")
 	}
 }
+
+// --- Error classification tests --------------------------------------------
+
+// TestActuatorDeterministic4xxGivesUpImmediately verifies that non-404 4xx
+// errors fail fast without consuming the backoff window (they are
+// deterministic — retrying just wastes ~25s).
+func TestActuatorDeterministic4xxGivesUpImmediately(t *testing.T) {
+	w := &mockMTXWriter{patchErr: &mediamtx.APIError{StatusCode: 400, Body: "bad request"}}
+	a := newTestActuator(w)
+	go a.Run()
+	defer a.Stop()
+
+	err := a.SetRecord("cam-1", true)
+	if err == nil {
+		t.Fatal("expected deterministic error")
+	}
+	if _, _, patch := w.counts(); patch != 1 {
+		t.Errorf("expected exactly 1 attempt (no retry on 4xx), got %d", patch)
+	}
+}
+
+// TestActuatorOffOnMissingPathIsTrivialSuccess: record-off against a missing
+// path (404) means the desired state ("not recording") already holds.
+func TestActuatorOffOnMissingPathIsTrivialSuccess(t *testing.T) {
+	w := &mockMTXWriter{patchErr: &mediamtx.APIError{StatusCode: 404, Body: "not found"}}
+	a := newTestActuator(w)
+	go a.Run()
+	defer a.Stop()
+
+	if err := a.SetRecord("cam-gone", false); err != nil {
+		t.Fatalf("record-off on missing path must be trivial success, got: %v", err)
+	}
+	if _, _, patch := w.counts(); patch != 1 {
+		t.Errorf("expected exactly 1 attempt, got %d", patch)
+	}
+}
+
+// TestActuatorOnOnMissingPathIsDeterministicFailure: record-on against a
+// missing path is a real precondition failure — give up fast; the reconciler
+// re-drives the intent after reconcileStreams recreates the path.
+func TestActuatorOnOnMissingPathIsDeterministicFailure(t *testing.T) {
+	w := &mockMTXWriter{patchErr: &mediamtx.APIError{StatusCode: 404, Body: "not found"}}
+	a := newTestActuator(w)
+	go a.Run()
+	defer a.Stop()
+
+	err := a.SetRecord("cam-gone", true)
+	if err == nil {
+		t.Fatal("expected deterministic failure for record-on on missing path")
+	}
+	if _, _, patch := w.counts(); patch != 1 {
+		t.Errorf("expected exactly 1 attempt (no retry on 404), got %d", patch)
+	}
+}
+
+// TestActuatorDeleteMissingPathIsTrivialSuccess: deleting a path that does
+// not exist means the desired state ("path gone") already holds.
+func TestActuatorDeleteMissingPathIsTrivialSuccess(t *testing.T) {
+	w := &mockMTXWriter{deleteErr: &mediamtx.APIError{StatusCode: 404, Body: "not found"}}
+	a := newTestActuator(w)
+	go a.Run()
+	defer a.Stop()
+
+	if err := a.DeletePath("cam-gone"); err != nil {
+		t.Fatalf("delete of missing path must be trivial success, got: %v", err)
+	}
+	if _, del, _ := w.counts(); del != 1 {
+		t.Errorf("expected exactly 1 attempt, got %d", del)
+	}
+}

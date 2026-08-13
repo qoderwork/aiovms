@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -24,10 +25,16 @@ import (
 //     exactly one writer and handler-vs-reconciler interleaving races are
 //     eliminated by construction.
 //
-//   - Coalescing: while a command for (kind, path) is still pending, a newer
-//     command for the same key replaces its payload (last-write-wins) and
-//     inherits its waiters. This bounds queue growth during a sustained
-//     MediaMTX outage and guarantees the freshest desired state wins.
+//   - Coalescing: while a command for (kind, path) is QUEUED, a newer command
+//     for the same key replaces its payload (last-write-wins) and inherits
+//     its waiters. Scope is deliberately limited: a command leaves `pending`
+//     when execution starts, so the in-flight retry window (~25s until
+//     give-up) does NOT coalesce — new enqueues for that key create separate
+//     queue entries. Under "reads OK, writes failing" this can grow the
+//     queue; growth is bounded by actuatorQueueSize with drop-on-full, and
+//     the reconciler re-drives dropped intents later. At the current scale
+//     this trade-off beats full-lifetime pending (which complicates the
+//     waiter lifecycle).
 //
 //   - At-least-once + idempotent: all three operations are idempotent
 //     (AddPath is upsert, PatchPath sets absolute state, DeletePath of a
@@ -36,10 +43,20 @@ import (
 //     is abandoned with an error — the reconciler re-enqueues whatever is
 //     still drifted on a later cycle (level-triggered safety net).
 //
-//   - Sync vs async: API handlers use the sync methods (wait up to
-//     applyTimeout so the HTTP response reflects the outcome); the
-//     reconciler uses the fire-and-forget Enqueue* variants and must never
-//     block on MediaMTX availability.
+//   - Error classification: 4xx responses are deterministic. record-off and
+//     delete against a missing path (404) are treated as success — the
+//     desired state already holds. Other 4xx give up immediately (no
+//     backoff); for record-on on a missing path the reconciler re-drives the
+//     intent once the path exists. Network errors retry with backoff.
+//
+//   - Sync vs async: sync methods (EnsurePath/DeletePath) wait up to
+//     applyTimeout and serve camera lifecycle operations, where the apply
+//     outcome is surfaced to the caller. Recording start/stop use the async
+//     EnqueueSetRecord: their API contract is intent-commit — the session
+//     row is the commit point and the response does not depend on MTX apply;
+//     convergence is guaranteed by drift recovery + orphan repair and is
+//     observable via vms_drift_events_total. The reconciler itself only uses
+//     fire-and-forget variants and never blocks on MediaMTX availability.
 
 const (
 	actuatorQueueSize   = 256
@@ -237,6 +254,29 @@ func (a *Actuator) execute(cmd *command) {
 			return
 		}
 
+		// Error classification: 4xx client errors are deterministic — retrying
+		// them wastes the whole backoff window. Two sub-cases by command
+		// semantics:
+		//   - record-off / delete against a missing path: the desired state
+		//     ("not recording" / "path gone") already holds → treat as success;
+		//   - anything else (e.g. record-on against a missing path): a real
+		//     precondition failure. Give up immediately; the level-triggered
+		//     reconciler re-drives the intent once the precondition is met
+		//     (e.g. reconcileStreams re-creates the path).
+		var apiErr *mediamtx.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 {
+			if desiredStateAlreadySatisfied(kind, record, apiErr.StatusCode) {
+				metrics.ActuatorCommandsTotal.WithLabelValues(string(kind), "ok").Inc()
+				logger.Infof("actuator: %s for %s trivially satisfied (%v)", kind, path, err)
+				notifyWaiters(waiters, nil)
+				return
+			}
+			metrics.ActuatorCommandsTotal.WithLabelValues(string(kind), "failed").Inc()
+			logger.Errorf("actuator: giving up on %s for %s (deterministic): %v", kind, path, err)
+			notifyWaiters(waiters, err)
+			return
+		}
+
 		if attempt >= maxApplyAttempts-1 {
 			metrics.ActuatorCommandsTotal.WithLabelValues(string(kind), "failed").Inc()
 			logger.Errorf("actuator: giving up on %s for %s after %d attempts: %v",
@@ -254,6 +294,23 @@ func (a *Actuator) execute(cmd *command) {
 			return
 		}
 	}
+}
+
+// desiredStateAlreadySatisfied reports whether a 4xx response (typically 404)
+// means the command's desired state already holds. Turning recording off or
+// deleting a path that does not exist is trivially satisfied; turning
+// recording on for a missing path is NOT (the path must be ensured first).
+func desiredStateAlreadySatisfied(kind cmdKind, record bool, statusCode int) bool {
+	if statusCode != http.StatusNotFound {
+		return false
+	}
+	switch kind {
+	case cmdDeletePath:
+		return true
+	case cmdSetRecord:
+		return !record
+	}
+	return false
 }
 
 func (a *Actuator) apply(kind cmdKind, path string, cfg mediamtx.PathConfig, record bool) error {

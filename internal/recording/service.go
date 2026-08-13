@@ -23,10 +23,12 @@ type Service interface {
 }
 
 // recordActuator abstracts the MediaMTX actuator (single writer) for
-// testability. Recording control is the only MediaMTX mutation this service
-// performs; the actuator applies it serially with retries.
+// testability. Recording control uses the ASYNC variant on purpose: the API
+// contract is intent-commit — the session row is the commit point, and MTX
+// convergence is guaranteed by drift recovery + orphan repair, observable
+// via vms_drift_events_total.
 type recordActuator interface {
-	SetRecord(path string, on bool) error
+	EnqueueSetRecord(path string, on bool)
 }
 
 type service struct {
@@ -110,15 +112,11 @@ func (s *service) StartManual(ctx context.Context, tenantID int64, cameraID stri
 		_ = s.repo.CloseSession(existing.ID, time.Now())
 	}
 
-	// 1. Enable recording first (via actuator; waits for apply): if it fails,
-	//    we don't create a dangling session.
-	//    注意：一期录像始终使用主码流（cam.MediaMTXPath），stream_type 暂不生效。
-	//    SetRecord 同时关闭 sourceOnDemand，确保 MediaMTX 主动拉流录像，不依赖有人预览。
-	if err := s.act.SetRecord(cam.MediaMTXPath, true); err != nil {
-		return err
-	}
-
-	// 2. Create session record (end_time IS NULL = active).
+	// Intent-commit contract: the session row is the commit point. Create it
+	// FIRST so the API answer reflects committed intent; the MediaMTX apply
+	// is enqueued asynchronously. If the apply is delayed (MTX slow/down),
+	// drift recovery (active session + not recording -> re-enable) converges
+	// it on a later cycle — the response does not depend on MTX state.
 	now := time.Now()
 	sess := &model.RecordingSession{
 		ID:          uuid.NewString(),
@@ -130,11 +128,12 @@ func (s *service) StartManual(ctx context.Context, tenantID int64, cameraID stri
 		UpdatedAt:   now,
 	}
 	if err := s.repo.CreateSession(sess); err != nil {
-		// Best-effort rollback: disable recording to avoid a recording without a session.
-		logger.Errorf("start manual: create session for camera %s: %v (rolling back mediamtx)", cameraID, err)
-		_ = s.act.SetRecord(cam.MediaMTXPath, false)
 		return apperror.Wrap(err, 50000, 500, "failed to create recording session")
 	}
+
+	// 注意：一期录像始终使用主码流（cam.MediaMTXPath），stream_type 暂不生效。
+	// record-on 同时关闭 sourceOnDemand，确保 MediaMTX 主动拉流录像，不依赖有人预览。
+	s.act.EnqueueSetRecord(cam.MediaMTXPath, true)
 	return nil
 }
 
@@ -144,11 +143,11 @@ func (s *service) StopManual(ctx context.Context, tenantID int64, cameraID strin
 		return err
 	}
 
-	// 1. Close the active session FIRST. The session is the source of truth for
-	//    desired recording state: while it is open, the reconciler's drift recovery
-	//    re-applies record:true every cycle. Closing it before stopping MediaMTX
-	//    removes the window where Stop patches record:false but the reconciler
-	//    immediately flips it back to true (stop silently undone).
+	// Intent-commit contract: closing the session IS the stop. The MediaMTX
+	// apply is enqueued asynchronously; if it cannot be applied right away
+	// (MTX slow/down), orphan repair stops the recording on a later cycle.
+	// The API answer reflects committed intent — MTX slowness no longer
+	// surfaces as a spurious "stop failed" while the stop is converging.
 	sess, sessErr := s.repo.FindActiveSessionByCamera(cameraID)
 	if sessErr == nil && sess != nil {
 		if err := s.repo.CloseSession(sess.ID, time.Now()); err != nil {
@@ -157,15 +156,9 @@ func (s *service) StopManual(ctx context.Context, tenantID int64, cameraID strin
 		}
 	}
 	// No active session — MediaMTX may still be recording (e.g. previous stop
-	// crashed after closing the session); fall through to patch anyway (idempotent).
+	// crashed after closing the session); enqueue anyway (idempotent).
 
-	// 2. Stop MediaMTX recording (idempotent: safe even if not recording).
-	//    恢复 sourceOnDemand=true，无人预览时停止拉流节省资源。
-	if err := s.act.SetRecord(cam.MediaMTXPath, false); err != nil {
-		// Session already closed. If the apply fails, the reconciler's orphan-record
-		// repair will stop recording on a later cycle, so no retry loop is needed here.
-		return err
-	}
+	s.act.EnqueueSetRecord(cam.MediaMTXPath, false)
 	return nil
 }
 
