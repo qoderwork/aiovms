@@ -56,6 +56,13 @@ const docTemplate = `{
                         "description": "页码（从 1 开始）",
                         "name": "page",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -961,6 +968,46 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/utils.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/internal/segments/complete": {
+            "post": {
+                "description": "MediaMTX runOnRecordSegmentComplete 钩子回调，立即入库已完成的录像分片",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "内部接口"
+                ],
+                "summary": "分片完成回调（内部）",
+                "parameters": [
+                    {
+                        "description": "分片信息",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/recording.SegmentCompleteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/utils.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/utils.Response"
                         }
@@ -1881,6 +1928,19 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "recording.SegmentCompleteRequest": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "description": "Path is the MediaMTX path name (e.g. \"cam-a1b2c3d4\").",
+                    "type": "string"
+                },
+                "segment_path": {
+                    "description": "SegmentPath is the absolute path of the completed segment file.",
+                    "type": "string"
                 }
             }
         },

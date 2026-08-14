@@ -271,6 +271,14 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 		}
 		dbPaths[cam.MediaMTXPath] = true
 
+		// Build the authenticated source URL once; drift comparison and
+		// re-registration must use the same value.
+		source, srcErr := cam.SourceURL()
+		if srcErr != nil {
+			logger.Errorf("reconcile streams: build source URL for %s: %v", cam.ID, srcErr)
+			continue
+		}
+
 		existing, exists := mtxConfigs[cam.MediaMTXPath]
 		if exists {
 			// Drift comparison covers source and the segment-complete hook.
@@ -279,14 +287,24 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 			// Including it here caused reconcileStreams to fight with reconcileRecording,
 			// deleting the path every 10s and breaking recording into ~20s fragments.
 			hookDrift := existing.RunOnRecordSegmentComplete != r.hookCommand
-			if existing.Source == cam.StreamURL && !hookDrift {
+			if existing.Source == source && !hookDrift {
+				// Path is healthy. A camera stuck in "error" (e.g. a transient
+				// registration failure whose async apply later succeeded) has no
+				// other recovery path: the status probe skips error, and this
+				// branch bypasses the EnsurePath + connecting reset below.
+				// Recover it to connecting so the probe can converge it to
+				// online/offline.
+				if cam.Status == "error" {
+					logger.Infof("reconcile streams: path healthy, recovering camera %s from error", cam.ID)
+					_ = r.camRepo.UpdateStatus(cam.ID, "connecting")
+				}
 				continue // everything matches, nothing to do
 			}
-			if existing.Source != cam.StreamURL {
+			if existing.Source != source {
 				// Source changed — delete and re-add. The actuator serializes
 				// per-path mutations, so the ensure lands after the delete.
-				logger.Warnf("reconcile streams: drift detected for %s (source %q -> %q)",
-					cam.MediaMTXPath, existing.Source, cam.StreamURL)
+				// Do NOT log source URLs: they may contain RTSP credentials.
+				logger.Warnf("reconcile streams: drift detected for %s (source changed)", cam.MediaMTXPath)
 				r.act.EnqueueDeletePath(cam.MediaMTXPath)
 			} else {
 				// Hook config drifted (e.g. right after an upgrade): converge
@@ -297,7 +315,7 @@ func (r *Reconciler) reconcileStreams(mtxConfigs map[string]mediamtx.PathConfigI
 		}
 
 		r.act.EnqueueEnsurePath(cam.MediaMTXPath, mediamtx.PathConfig{
-			Source:                     cam.StreamURL,
+			Source:                     source,
 			SourceOnDemand:             true,
 			RecordPath:                 r.recordPath + "/%path/%Y-%m-%d_%H-%M-%S",
 			RecordSegmentDuration:      r.segmentDuration,

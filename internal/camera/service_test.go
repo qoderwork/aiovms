@@ -258,6 +258,46 @@ func TestServiceCreate(t *testing.T) {
 	}
 }
 
+func TestServiceCreate_InjectsRTSPCredentials(t *testing.T) {
+	initCrypto(t)
+	repo := newMockRepo()
+	act := &mockActuator{}
+	svc := &service{repo: repo, act: act, snap: &mockSnapshotter{}}
+
+	err := svc.Create(context.Background(), &model.Camera{
+		Name:      "auth-cam",
+		IP:        "192.168.1.100",
+		Port:      554,
+		Protocol:  "RTSP",
+		Username:  "admin",
+		Password:  "secret123",
+		StreamURL: "rtsp://192.168.1.100:554/stream",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(act.ensurePathCalls) != 1 {
+		t.Fatalf("expected 1 EnsurePath call, got %d", len(act.ensurePathCalls))
+	}
+	want := "rtsp://admin:secret123@192.168.1.100:554/stream"
+	if got := act.ensurePathCalls[0].cfg.Source; got != want {
+		t.Errorf("source = %q, want %q", got, want)
+	}
+}
+
+func TestValidateCamera_RejectsNonRTSPStreamURL(t *testing.T) {
+	cam := &model.Camera{
+		Name:      "cam",
+		IP:        "192.168.1.100",
+		Port:      554,
+		Protocol:  "RTSP",
+		StreamURL: "http://192.168.1.100/stream",
+	}
+	if err := validateCamera(cam); err == nil {
+		t.Fatal("expected error for non-rtsp stream_url, got nil")
+	}
+}
+
 func TestServiceUpdate(t *testing.T) {
 	initCrypto(t)
 	repo := newMockRepo()

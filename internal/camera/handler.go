@@ -108,6 +108,7 @@ func NewHandler(svc Service) *Handler {
 // @Produce json
 // @Param q query string false "名称或 IP 关键字"
 // @Param page query int false "页码（从 1 开始）" default(1)
+// @Param page_size query int false "每页数量" default(10)
 // @Success 200 {object} utils.PaginatedResponse{data=[]model.Camera}
 // @Failure 500 {object} utils.Response
 // @Security TenantHeader
@@ -117,13 +118,14 @@ func (h *Handler) List(c *gin.Context) {
 	tenantID := int64(middleware.GetTenantID(c))
 	query := c.Query("q")
 	page := parsePage(c)
+	pageSize := parsePageSize(c)
 
-	cams, total, err := h.svc.List(c.Request.Context(), tenantID, query, page, 10)
+	cams, total, err := h.svc.List(c.Request.Context(), tenantID, query, page, pageSize)
 	if err != nil {
 		utils.HandleError(c, err)
 		return
 	}
-	utils.Paginated(c, cams, total, page, 10)
+	utils.Paginated(c, cams, total, page, pageSize)
 }
 
 // Create godoc
@@ -543,6 +545,16 @@ func parsePage(c *gin.Context) int {
 		}
 	}
 	return p
+}
+
+func parsePageSize(c *gin.Context) int {
+	n := 10
+	if v := c.Query("page_size"); v != "" {
+		if p := parseIntSafe(v); p > 0 {
+			n = p
+		}
+	}
+	return n
 }
 
 func parseIntSafe(s string) int {

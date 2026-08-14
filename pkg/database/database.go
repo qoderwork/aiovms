@@ -2,6 +2,8 @@ package database
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"time"
 
 	"aiovms/pkg/logger"
@@ -65,7 +67,15 @@ func Init(cfg Config) (*gorm.DB, error) {
 	}
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(logLevel),
+		Logger: gormlogger.New(
+			log.New(os.Stdout, "\r\n", log.LstdFlags),
+			gormlogger.Config{
+				SlowThreshold:             200 * time.Millisecond,
+				LogLevel:                  logLevel,
+				IgnoreRecordNotFoundError: true, // 查不到记录只返回 null，不刷错误日志
+				Colorful:                  true,
+			},
+		),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)

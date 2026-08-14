@@ -267,6 +267,38 @@ func TestReconcileStreams_SkipsExistingPathWithMatchingConfig(t *testing.T) {
 	}
 }
 
+func TestReconcileStreams_RecoversErrorCameraWithHealthyPath(t *testing.T) {
+	r, camRepo, _, _, reader, act := newTestReconciler()
+	camRepo.cams = []model.Camera{
+		{ID: "cam-1", MediaMTXPath: "cam-cam-1", StreamURL: "rtsp://1.2.3.4/stream", Status: "error"},
+	}
+	// Path exists with matching config (e.g. a transient registration failure
+	// whose async apply later succeeded) — camera still stuck in error.
+	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
+		Name:           "cam-cam-1",
+		Source:         "rtsp://1.2.3.4/stream",
+		SourceOnDemand: true,
+		Record:         false,
+	}
+
+	r.reconcileStreams(reader.pathConfigs)
+
+	// Path is healthy, so no path operations are needed.
+	if len(act.ensurePathCalls) != 0 {
+		t.Errorf("expected 0 EnsurePath calls, got %d", len(act.ensurePathCalls))
+	}
+	if len(act.deletePathCalls) != 0 {
+		t.Errorf("expected 0 DeletePath calls, got %d", len(act.deletePathCalls))
+	}
+	// But the stuck error status must be recovered to connecting.
+	if len(camRepo.updatedIDs) != 1 || camRepo.updatedIDs[0] != "cam-1" {
+		t.Fatalf("expected status update for cam-1, got %v", camRepo.updatedIDs)
+	}
+	if camRepo.updatedStats[0] != "connecting" {
+		t.Errorf("status = %q, want 'connecting'", camRepo.updatedStats[0])
+	}
+}
+
 func TestReconcileStreams_DetectsSourceDrift(t *testing.T) {
 	r, camRepo, _, _, reader, act := newTestReconciler()
 	camRepo.cams = []model.Camera{

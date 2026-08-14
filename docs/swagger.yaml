@@ -236,6 +236,15 @@ definitions:
           type: string
         type: array
     type: object
+  recording.SegmentCompleteRequest:
+    properties:
+      path:
+        description: Path is the MediaMTX path name (e.g. "cam-a1b2c3d4").
+        type: string
+      segment_path:
+        description: SegmentPath is the absolute path of the completed segment file.
+        type: string
+    type: object
   schedule.CreateScheduleRequest:
     properties:
       camera_id:
@@ -361,6 +370,11 @@ paths:
         description: 页码（从 1 开始）
         in: query
         name: page
+        type: integer
+      - default: 10
+        description: 每页数量
+        in: query
+        name: page_size
         type: integer
       produces:
       - application/json
@@ -873,6 +887,32 @@ paths:
       summary: 摄像头状态列表
       tags:
       - 摄像头管理
+  /internal/segments/complete:
+    post:
+      consumes:
+      - application/json
+      description: MediaMTX runOnRecordSegmentComplete 钩子回调，立即入库已完成的录像分片
+      parameters:
+      - description: 分片信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/recording.SegmentCompleteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+      summary: 分片完成回调（内部）
+      tags:
+      - 内部接口
   /recordings:
     get:
       description: 按摄像头 + 时间范围分页查询录像

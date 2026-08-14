@@ -92,14 +92,19 @@ func (s *service) getForTenant(tenantID int64, id string) (*model.Camera, error)
 // 显式下发 recordPath 和 recordSegmentDuration，避免依赖 mediamtx.yml 的 all_others 继承
 // （显式 add 的命名路径不会继承 all_others，会用 setDefaults 硬编码默认值）。
 // hookCommand 为空时该字段被 omitempty 省略，即不启用分片完成回调。
-func (s *service) buildPathConfig(cam *model.Camera) mediamtx.PathConfig {
+// Source 会通过 model.Camera.SourceURL 注入 RTSP 认证凭据。
+func (s *service) buildPathConfig(cam *model.Camera) (mediamtx.PathConfig, error) {
+	source, err := cam.SourceURL()
+	if err != nil {
+		return mediamtx.PathConfig{}, apperror.Wrap(err, 50000, 500, "failed to build camera source URL")
+	}
 	return mediamtx.PathConfig{
-		Source:                     cam.StreamURL,
+		Source:                     source,
 		SourceOnDemand:             true,
 		RecordPath:                 s.recordPath + "/%path/%Y-%m-%d_%H-%M-%S",
 		RecordSegmentDuration:      s.segmentDuration,
 		RunOnRecordSegmentComplete: s.hookCommand,
-	}
+	}, nil
 }
 
 type StreamURLs struct {
@@ -163,7 +168,11 @@ func (s *service) Create(ctx context.Context, cam *model.Camera) error {
 	}
 
 	// 一期仅注册主码流（stream_url）到 MediaMTX；sub_stream_url 暂未注册，二期实现子码流预览/录制时启用。
-	if err := s.act.EnsurePath(cam.MediaMTXPath, s.buildPathConfig(cam)); err != nil {
+	cfg, err := s.buildPathConfig(cam)
+	if err != nil {
+		return err
+	}
+	if err := s.act.EnsurePath(cam.MediaMTXPath, cfg); err != nil {
 		logger.Errorf("mediamtx register failed for camera %s: %v", cam.ID, err)
 		_ = s.repo.UpdateStatus(cam.ID, "error")
 		return apperror.Wrap(err, 50301, 503, "failed to register camera to mediamtx")
@@ -232,7 +241,11 @@ func (s *service) Update(ctx context.Context, tenantID int64, id string, cam *mo
 	}
 
 	// 重新注册主码流（一期不注册子码流）
-	if err := s.act.EnsurePath(existing.MediaMTXPath, s.buildPathConfig(existing)); err != nil {
+	cfg, err := s.buildPathConfig(existing)
+	if err != nil {
+		return err
+	}
+	if err := s.act.EnsurePath(existing.MediaMTXPath, cfg); err != nil {
 		logger.Errorf("mediamtx re-register failed for camera %s: %v", id, err)
 		return apperror.Wrap(err, 50301, 503, "failed to re-register camera to mediamtx")
 	}
@@ -272,7 +285,11 @@ func (s *service) Connect(ctx context.Context, tenantID int64, id string) error 
 	if err != nil {
 		return err
 	}
-	if err := s.act.EnsurePath(cam.MediaMTXPath, s.buildPathConfig(cam)); err != nil {
+	cfg, err := s.buildPathConfig(cam)
+	if err != nil {
+		return err
+	}
+	if err := s.act.EnsurePath(cam.MediaMTXPath, cfg); err != nil {
 		return err
 	}
 	// Mark as connecting; StatusChecker will probe to online/offline.
@@ -468,8 +485,9 @@ func validateCamera(cam *model.Camera) error {
 	if cam.StreamURL == "" {
 		return apperror.ErrInvalidInput.WithMessage("stream_url is required")
 	}
-	if _, err := url.Parse(cam.StreamURL); err != nil {
-		return apperror.ErrInvalidInput.WithMessage("invalid stream_url format")
+	u, err := url.Parse(cam.StreamURL)
+	if err != nil || u.Scheme != "rtsp" || u.Host == "" {
+		return apperror.ErrStreamURLInvalid.WithMessage("stream_url must be a valid rtsp://host[:port]/path URL")
 	}
 	return nil
 }
