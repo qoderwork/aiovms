@@ -198,7 +198,7 @@ func TestRecordingGet(t *testing.T) {
 	if rec.Filename != "test.mp4" {
 		t.Errorf("filename = %q", rec.Filename)
 	}
-	if playURL != "/recordings/cam-1/test.mp4" {
+	if playURL != "/recordings/files/cam-1/test.mp4" {
 		t.Errorf("playURL = %q", playURL)
 	}
 }

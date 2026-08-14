@@ -211,7 +211,7 @@ func main() {
 	api.Use(middleware.TenantHeaderMiddleware())
 	{
 		camera.RegisterRoutes(api, camera.NewHandler(cameraSvc))
-		recording.RegisterRoutes(api, recording.NewHandler(recSvc))
+		recording.RegisterRoutes(api, recording.NewHandler(recSvc, cfg.Recording.Path))
 		schedule.RegisterRoutes(api, schedule.NewHandler(schSvc))
 	}
 

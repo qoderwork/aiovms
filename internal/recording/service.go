@@ -72,10 +72,13 @@ func (s *service) Get(ctx context.Context, tenantID int64, id string) (*model.Re
 	if err != nil {
 		return nil, "", err
 	}
-	// Playback URL served by Nginx from /recordings/ path.
-	// Uses MediaMTXPath (e.g. "cam-a1b2c3d4") which matches the physical directory
-	// structure, NOT the full camera UUID.
-	playURL := fmt.Sprintf("/recordings/%s/%s", rec.MediaMTXPath, rec.Filename)
+	// Playback URL. In production the file bytes are delivered by the integrated
+	// deployment layer (Java NMS backend or its nginx) from the shared recordings
+	// volume — aiovms only reports the path. For local self-test, aiovms serves the
+	// same file via GET /recordings/files/* (see Handler.ServeRecording), so this URL
+	// is directly openable in a browser. Uses MediaMTXPath (e.g. "cam-a1b2c3d4") which
+	// matches the physical directory structure, NOT the full camera UUID.
+	playURL := fmt.Sprintf("/recordings/files/%s/%s", rec.MediaMTXPath, rec.Filename)
 	return rec, playURL, nil
 }
 

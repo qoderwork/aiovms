@@ -2,7 +2,10 @@ package recording
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -13,11 +16,41 @@ import (
 )
 
 type Handler struct {
-	svc Service
+	svc            Service
+	recordingsRoot string
 }
 
-func NewHandler(svc Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc Service, recordingsRoot string) *Handler {
+	return &Handler{svc: svc, recordingsRoot: recordingsRoot}
+}
+
+// ServeRecording streams a recorded .mp4 file from the local recordings volume.
+//
+// SELF-TEST ONLY. In production the file bytes are delivered by the integrated
+// deployment layer (Java NMS backend or its nginx) from the shared recordings
+// volume — aiovms only records metadata and reports the path. This route exists so
+// the /recordings/files/* URL returned by Get() can be opened directly in a browser
+// during local API testing (Chrome native <video> + HTTP Range → seek/scrub works
+// for fMP4).
+//
+// Mounted at /recordings/files/*filepath (NOT /recordings/*filepath) to avoid gin's
+// panic when a :param and *catchall share the same node (/recordings/:id already exists).
+// Tenant isolation is intentionally NOT enforced here — this mirrors the production
+// model where the static file layer is not URL-tenant-gated; the integrated layer owns auth.
+func (h *Handler) ServeRecording(c *gin.Context) {
+	rel := strings.TrimPrefix(c.Param("filepath"), "/")
+	if rel == "" {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	root := filepath.Clean(h.recordingsRoot)
+	full := filepath.Clean(filepath.Join(root, rel))
+	// Guard against path traversal: the resolved path must stay within root.
+	if full != root && !strings.HasPrefix(full, root+string(os.PathSeparator)) {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	c.File(full)
 }
 
 // List godoc
