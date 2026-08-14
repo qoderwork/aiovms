@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +15,23 @@ import (
 
 	"aiovms/pkg/logger"
 )
+
+// authStatusRe matches ONVIF HTTP auth failures (401 Unauthorized / 403 Forbidden)
+// as reported by onvif-go, e.g. "HTTP request failed with status 401: ..." or a
+// SOAP fault body containing "HTTP Error: 401 Unauthorized". It deliberately does
+// NOT match 400/404/500, which are protocol/connectivity errors, not auth.
+var authStatusRe = regexp.MustCompile(`(?i)(?:status\s+|http\s+error:\s*)?(401|403)`)
+
+// isAuthError reports whether the underlying ONVIF error is an authentication
+// failure (HTTP 401/403) rather than a protocol/connectivity error. A 401/403
+// response implies the device is reachable and ONVIF-capable — only credentials
+// are missing/wrong — so callers can surface a precise, actionable message.
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return authStatusRe.MatchString(err.Error())
+}
 
 // DiscoveredDevice represents a camera found via ONVIF WS-Discovery.
 type DiscoveredDevice struct {
@@ -185,6 +203,9 @@ func (s *discoveryService) getDeviceInfo(ctx context.Context, deviceAddr, user, 
 
 	info, err := client.GetDeviceInformation(ctx)
 	if err != nil {
+		if isAuthError(err) {
+			return nil, fmt.Errorf("device reachable at %s but authentication required: provide username/password: %w", deviceAddr, err)
+		}
 		return nil, fmt.Errorf("get device information: %w", err)
 	}
 
