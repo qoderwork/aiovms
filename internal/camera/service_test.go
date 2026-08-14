@@ -298,6 +298,24 @@ func TestValidateCamera_RejectsNonRTSPStreamURL(t *testing.T) {
 	}
 }
 
+func TestValidateCamera_RejectsBareHostStreamURL(t *testing.T) {
+	for _, u := range []string{
+		"rtsp://192.168.1.100",
+		"rtsp://192.168.1.100/",
+	} {
+		cam := &model.Camera{
+			Name:      "cam",
+			IP:        "192.168.1.100",
+			Port:      554,
+			Protocol:  "RTSP",
+			StreamURL: u,
+		}
+		if err := validateCamera(cam); err == nil {
+			t.Errorf("expected error for stream_url %q (no path), got nil", u)
+		}
+	}
+}
+
 func TestServiceUpdate(t *testing.T) {
 	initCrypto(t)
 	repo := newMockRepo()

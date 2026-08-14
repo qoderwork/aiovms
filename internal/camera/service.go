@@ -486,8 +486,8 @@ func validateCamera(cam *model.Camera) error {
 		return apperror.ErrInvalidInput.WithMessage("stream_url is required")
 	}
 	u, err := url.Parse(cam.StreamURL)
-	if err != nil || u.Scheme != "rtsp" || u.Host == "" {
-		return apperror.ErrStreamURLInvalid.WithMessage("stream_url must be a valid rtsp://host[:port]/path URL")
+	if err != nil || u.Scheme != "rtsp" || u.Host == "" || u.Path == "" || u.Path == "/" {
+		return apperror.ErrStreamURLInvalid.WithMessage("stream_url must be a valid rtsp://host[:port]/path URL with a non-empty path")
 	}
 	return nil
 }
