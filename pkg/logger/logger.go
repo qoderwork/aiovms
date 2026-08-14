@@ -53,15 +53,15 @@ func buildLogger(cfg Config) *zap.SugaredLogger {
 	setLevel(cfg.Level)
 
 	encoderCfg := zapcore.EncoderConfig{
-		MessageKey:    "msg",
-		LevelKey:      "level",
-		TimeKey:       "ts",
-		CallerKey:     "caller",
-		LineEnding:    zapcore.DefaultLineEnding,
-		EncodeLevel:   zapcore.LowercaseLevelEncoder,
-		EncodeTime:    utcTimeEncoder,
+		MessageKey:     "msg",
+		LevelKey:       "level",
+		TimeKey:        "ts",
+		CallerKey:      "caller",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeTime:     utcTimeEncoder,
 		EncodeDuration: zapcore.SecondsDurationEncoder,
-		EncodeCaller:  zapcore.ShortCallerEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
 	}
 
 	var cores []zapcore.Core
@@ -139,15 +139,15 @@ func getLogger() *zap.SugaredLogger {
 	return globalLogger
 }
 
-func Debug(args ...interface{})                 { getLogger().Debug(args...) }
-func Info(args ...interface{})                  { getLogger().Info(args...) }
-func Warn(args ...interface{})                  { getLogger().Warn(args...) }
-func Error(args ...interface{})                 { getLogger().Error(args...) }
-func Fatal(args ...interface{})                 { getLogger().Fatal(args...) }
-func Debugf(template string, args ...interface{}) { getLogger().Debugf(template, args...) }
-func Infof(template string, args ...interface{})  { getLogger().Infof(template, args...) }
-func Warnf(template string, args ...interface{})  { getLogger().Warnf(template, args...) }
-func Errorf(template string, args ...interface{}) { getLogger().Errorf(template, args...) }
-func Fatalf(template string, args ...interface{}) { getLogger().Fatalf(template, args...) }
+func Debug(args ...interface{})                       { getLogger().Debug(args...) }
+func Info(args ...interface{})                        { getLogger().Info(args...) }
+func Warn(args ...interface{})                        { getLogger().Warn(args...) }
+func Error(args ...interface{})                       { getLogger().Error(args...) }
+func Fatal(args ...interface{})                       { getLogger().Fatal(args...) }
+func Debugf(template string, args ...interface{})     { getLogger().Debugf(template, args...) }
+func Infof(template string, args ...interface{})      { getLogger().Infof(template, args...) }
+func Warnf(template string, args ...interface{})      { getLogger().Warnf(template, args...) }
+func Errorf(template string, args ...interface{})     { getLogger().Errorf(template, args...) }
+func Fatalf(template string, args ...interface{})     { getLogger().Fatalf(template, args...) }
 func Infow(msg string, keysAndValues ...interface{})  { getLogger().Infow(msg, keysAndValues...) }
 func Errorw(msg string, keysAndValues ...interface{}) { getLogger().Errorw(msg, keysAndValues...) }

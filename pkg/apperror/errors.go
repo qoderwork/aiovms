@@ -8,7 +8,7 @@ import (
 // AppError represents a structured application error with HTTP status code,
 // 5-digit business error code, and user-facing message.
 type AppError struct {
-	BizCode    int    // 5-digit business code (e.g. 40100, 40301)
+	BizCode    int // 5-digit business code (e.g. 40100, 40301)
 	Message    string
 	StatusCode int
 	Cause      error
@@ -37,13 +37,13 @@ func (e *AppError) WithMessage(message string) *AppError {
 
 // 5-digit business code convention: first 3 digits = HTTP status, last 2 = sequence.
 var (
-	ErrNotFound      = New(40401, 404, "resource not found")
-	ErrInvalidInput  = New(40001, 400, "invalid input")
-	ErrUnauthorized  = New(40100, 401, "unauthorized")
-	ErrForbidden     = New(40301, 403, "forbidden")
-	ErrConflict      = New(40901, 409, "resource conflict")
-	ErrInternal      = New(50000, 500, "internal error")
-	ErrUnavailable   = New(50301, 503, "service unavailable")
+	ErrNotFound     = New(40401, 404, "resource not found")
+	ErrInvalidInput = New(40001, 400, "invalid input")
+	ErrUnauthorized = New(40100, 401, "unauthorized")
+	ErrForbidden    = New(40301, 403, "forbidden")
+	ErrConflict     = New(40901, 409, "resource conflict")
+	ErrInternal     = New(50000, 500, "internal error")
+	ErrUnavailable  = New(50301, 503, "service unavailable")
 )
 
 // VMS domain errors
