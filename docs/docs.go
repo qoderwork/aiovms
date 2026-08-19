@@ -1928,6 +1928,40 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "streams": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/onvif.StreamInfo"
+                    }
+                }
+            }
+        },
+        "onvif.StreamInfo": {
+            "type": "object",
+            "properties": {
+                "encoding": {
+                    "description": "H264 / H265 / JPEG / MPEG4",
+                    "type": "string"
+                },
+                "frame_rate": {
+                    "description": "frame rate limit",
+                    "type": "integer"
+                },
+                "height": {
+                    "description": "encoder resolution height",
+                    "type": "integer"
+                },
+                "profile_name": {
+                    "description": "media profile name (main/sub)",
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "width": {
+                    "description": "encoder resolution width",
+                    "type": "integer"
                 }
             }
         },

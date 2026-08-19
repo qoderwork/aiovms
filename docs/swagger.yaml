@@ -235,6 +235,30 @@ definitions:
         items:
           type: string
         type: array
+      streams:
+        items:
+          $ref: '#/definitions/onvif.StreamInfo'
+        type: array
+    type: object
+  onvif.StreamInfo:
+    properties:
+      encoding:
+        description: H264 / H265 / JPEG / MPEG4
+        type: string
+      frame_rate:
+        description: frame rate limit
+        type: integer
+      height:
+        description: encoder resolution height
+        type: integer
+      profile_name:
+        description: media profile name (main/sub)
+        type: string
+      url:
+        type: string
+      width:
+        description: encoder resolution width
+        type: integer
     type: object
   recording.SegmentCompleteRequest:
     properties:

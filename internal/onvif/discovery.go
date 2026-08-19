@@ -33,16 +33,30 @@ func isAuthError(err error) bool {
 	return authStatusRe.MatchString(err.Error())
 }
 
+// StreamInfo describes a single media profile's stream: its RTSP URL together
+// with the video encoding attributes (codec, resolution, frame rate) reported
+// by ONVIF. This lets callers distinguish main/sub streams and H264/H265 without
+// pulling the stream.
+type StreamInfo struct {
+	URL         string `json:"url"`
+	Encoding    string `json:"encoding"`     // H264 / H265 / JPEG / MPEG4
+	Width       int    `json:"width"`        // encoder resolution width
+	Height      int    `json:"height"`       // encoder resolution height
+	FrameRate   int    `json:"frame_rate"`   // frame rate limit
+	ProfileName string `json:"profile_name"` // media profile name (main/sub)
+}
+
 // DiscoveredDevice represents a camera found via ONVIF WS-Discovery.
 type DiscoveredDevice struct {
-	IP           string   `json:"ip"`
-	Port         int      `json:"port"`
-	Name         string   `json:"name"`
-	Manufacturer string   `json:"manufacturer"`
-	Model        string   `json:"model"`
-	Firmware     string   `json:"firmware"`
-	SerialNumber string   `json:"serial_number"`
-	StreamURLs   []string `json:"stream_urls"`
+	IP           string       `json:"ip"`
+	Port         int          `json:"port"`
+	Name         string       `json:"name"`
+	Manufacturer string       `json:"manufacturer"`
+	Model        string       `json:"model"`
+	Firmware     string       `json:"firmware"`
+	SerialNumber string       `json:"serial_number"`
+	StreamURLs   []string     `json:"stream_urls"`
+	Streams      []StreamInfo `json:"streams,omitempty"`
 }
 
 // DeviceInfo holds basic manufacturer/model info.
@@ -57,7 +71,8 @@ type DeviceInfo struct {
 type DiscoveryService interface {
 	Discover(ctx context.Context, interfaceName string, timeoutSec int) ([]DiscoveredDevice, error)
 	// ProbeDevice probes a single device by IP:port via ONVIF unicast (no
-	// multicast), returning device info and the primary RTSP stream URL.
+	// multicast), returning device info and all RTSP stream URLs with their
+	// encoding attributes (codec, resolution, frame rate).
 	ProbeDevice(ctx context.Context, ip string, port int, user, pass string) (*DiscoveredDevice, error)
 }
 
@@ -129,8 +144,9 @@ func (s *discoveryService) Discover(ctx context.Context, interfaceName string, t
 }
 
 // ProbeDevice probes a single device at ip:port via ONVIF unicast, returning
-// device info and the primary RTSP stream URL. Suitable for Docker deployments
-// where WS-Discovery multicast does not cross the bridge network boundary.
+// device info and all RTSP stream URLs with their encoding attributes. Suitable
+// for Docker deployments where WS-Discovery multicast does not cross the bridge
+// network boundary.
 func (s *discoveryService) ProbeDevice(ctx context.Context, ip string, port int, user, pass string) (*DiscoveredDevice, error) {
 	if port <= 0 {
 		port = 80
@@ -151,43 +167,75 @@ func (s *discoveryService) ProbeDevice(ctx context.Context, ip string, port int,
 		SerialNumber: info.SerialNumber,
 	}
 
-	// Stream URL is best-effort: a device may have no media profiles or may
+	// Stream URLs are best-effort: a device may have no media profiles or may
 	// reject the GetStreamUri call even though GetDeviceInformation succeeded.
-	if streamURL, err := s.getStreamURL(ctx, addr, user, pass); err == nil && streamURL != "" {
-		dev.StreamURLs = []string{streamURL}
+	if streams, err := s.getStreamInfos(ctx, addr, user, pass); err == nil && len(streams) > 0 {
+		dev.Streams = streams
+		dev.StreamURLs = make([]string, 0, len(streams))
+		for _, st := range streams {
+			dev.StreamURLs = append(dev.StreamURLs, st.URL)
+		}
 	}
 
 	return dev, nil
 }
 
-// getStreamURL connects to an ONVIF device and extracts the first profile's RTSP stream URL.
-// deviceAddr can be a full URL, "ip:port", or bare IP.
-func (s *discoveryService) getStreamURL(ctx context.Context, deviceAddr, user, pass string) (string, error) {
+// getStreamInfos connects to an ONVIF device and extracts every media profile's
+// RTSP stream URL together with its video encoding attributes (codec, resolution,
+// frame rate). deviceAddr can be a full URL, "ip:port", or bare IP.
+func (s *discoveryService) getStreamInfos(ctx context.Context, deviceAddr, user, pass string) ([]StreamInfo, error) {
 	client, err := onvifgo.NewClient(deviceAddr,
 		onvifgo.WithCredentials(user, pass),
 		onvifgo.WithTimeout(5*time.Second),
 	)
 	if err != nil {
-		return "", fmt.Errorf("create onvif client: %w", err)
+		return nil, fmt.Errorf("create onvif client: %w", err)
 	}
 
 	if err := client.Initialize(ctx); err != nil {
-		return "", fmt.Errorf("initialize onvif client: %w", err)
+		return nil, fmt.Errorf("initialize onvif client: %w", err)
 	}
 
 	profiles, err := client.GetProfiles(ctx)
 	if err != nil {
-		return "", fmt.Errorf("get profiles: %w", err)
+		return nil, fmt.Errorf("get profiles: %w", err)
 	}
 	if len(profiles) == 0 {
-		return "", fmt.Errorf("no media profiles found")
+		return nil, fmt.Errorf("no media profiles found")
 	}
 
-	uri, err := client.GetStreamURI(ctx, profiles[0].Token)
-	if err != nil {
-		return "", fmt.Errorf("get stream uri: %w", err)
+	var streams []StreamInfo
+	seen := make(map[string]bool)
+	for _, p := range profiles {
+		uri, err := client.GetStreamURI(ctx, p.Token)
+		if err != nil {
+			// A profile may reject GetStreamUri (e.g. metadata-only); skip it.
+			logger.Warnf("get stream uri for profile %q: %v", p.Name, err)
+			continue
+		}
+		if uri.URI == "" || seen[uri.URI] {
+			continue
+		}
+		seen[uri.URI] = true
+
+		info := StreamInfo{URL: uri.URI, ProfileName: p.Name}
+		if enc := p.VideoEncoderConfiguration; enc != nil {
+			info.Encoding = enc.Encoding
+			if enc.Resolution != nil {
+				info.Width = enc.Resolution.Width
+				info.Height = enc.Resolution.Height
+			}
+			if enc.RateControl != nil {
+				info.FrameRate = enc.RateControl.FrameRateLimit
+			}
+		}
+		streams = append(streams, info)
 	}
-	return uri.URI, nil
+
+	if len(streams) == 0 {
+		return nil, fmt.Errorf("no stream uri found")
+	}
+	return streams, nil
 }
 
 // getDeviceInfo connects to an ONVIF device and retrieves manufacturer/model/firmware.
