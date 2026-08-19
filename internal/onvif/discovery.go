@@ -13,6 +13,7 @@ import (
 	onvifgo "github.com/0x524a/onvif-go"
 	"github.com/0x524a/onvif-go/discovery"
 
+	"aiovms/internal/rtsp"
 	"aiovms/pkg/logger"
 )
 
@@ -229,6 +230,16 @@ func (s *discoveryService) getStreamInfos(ctx context.Context, deviceAddr, user,
 				info.FrameRate = enc.RateControl.FrameRateLimit
 			}
 		}
+
+		// ONVIF's declared encoding is unreliable (some cameras report H264 but
+		// stream H265). Probe the real codec via RTSP DESCRIBE and override the
+		// ONVIF value when successful; keep the ONVIF value on failure.
+		if codec, err := rtsp.ProbeEncoding(uri.URI, user, pass); err == nil && codec != "" {
+			info.Encoding = codec
+		} else if err != nil {
+			logger.Warnf("rtsp probe encoding for profile %q (%s): %v", p.Name, uri.URI, err)
+		}
+
 		streams = append(streams, info)
 	}
 
