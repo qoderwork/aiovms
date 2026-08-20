@@ -13,6 +13,7 @@ import (
 	"aiovms/internal/mediamtx"
 	"aiovms/internal/model"
 	"aiovms/internal/onvif"
+	"aiovms/internal/rtsp"
 	"aiovms/pkg/apperror"
 	"aiovms/pkg/crypto"
 	"aiovms/pkg/logger"
@@ -107,6 +108,26 @@ func (s *service) buildPathConfig(cam *model.Camera) (mediamtx.PathConfig, error
 	}, nil
 }
 
+// rejectH265 probes the camera's stream URL and rejects H.265 streams, which
+// are unsupported in the current phase (browsers cannot decode H.265, so live
+// preview and playback both fail). Probe failures are non-blocking — only a
+// confirmed H265 stream is rejected, so transient RTSP errors never block
+// camera create/update.
+func (s *service) rejectH265(cam *model.Camera) error {
+	source, err := cam.SourceURL()
+	if err != nil {
+		return nil
+	}
+	codec, err := rtsp.ProbeEncoding(source, "", "")
+	if err != nil {
+		return nil
+	}
+	if codec == "H265" {
+		return apperror.ErrInvalidInput.WithMessage("unsupported codec H265: only H264 is supported")
+	}
+	return nil
+}
+
 type StreamURLs struct {
 	FLV    string `json:"flv"`
 	HLS    string `json:"hls"`
@@ -162,6 +183,11 @@ func (s *service) Create(ctx context.Context, cam *model.Camera) error {
 	cam.Status = "connecting"
 	cam.CreatedAt = time.Now()
 	cam.UpdatedAt = time.Now()
+
+	// 往 MediaMTX 注册前校验码流编码：H265 暂不支持。
+	if err := s.rejectH265(cam); err != nil {
+		return err
+	}
 
 	if err := s.repo.Create(cam); err != nil {
 		return apperror.Wrap(err, 50000, 500, "failed to create camera")
@@ -235,6 +261,11 @@ func (s *service) Update(ctx context.Context, tenantID int64, id string, cam *mo
 	existing.Latitude = cam.Latitude
 	existing.Longitude = cam.Longitude
 	existing.UpdatedAt = time.Now()
+
+	// 往 MediaMTX 注册前校验码流编码：H265 暂不支持。
+	if err := s.rejectH265(existing); err != nil {
+		return err
+	}
 
 	if err := s.repo.Update(existing); err != nil {
 		return apperror.Wrap(err, 50000, 500, "failed to update camera")
