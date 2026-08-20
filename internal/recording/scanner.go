@@ -32,6 +32,7 @@ type CameraLookup interface {
 //     immediate (fast-path) ingestion of completed segments.
 type Scanner struct {
 	svc        Service
+	repo       Repository
 	camLookup  CameraLookup
 	recordPath string
 	interval   time.Duration
@@ -40,13 +41,15 @@ type Scanner struct {
 }
 
 // NewScanner creates a recording file scanner. interval is the fallback scan
-// period; <= 0 defaults to 30s.
-func NewScanner(svc Service, recordPath string, camLookup CameraLookup, interval time.Duration) *Scanner {
+// period; <= 0 defaults to 30s. repo is used to load the ingested-file index
+// for incremental scanning (skip re-probing unchanged files).
+func NewScanner(svc Service, repo Repository, recordPath string, camLookup CameraLookup, interval time.Duration) *Scanner {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
 	return &Scanner{
 		svc:        svc,
+		repo:       repo,
 		camLookup:  camLookup,
 		recordPath: recordPath,
 		interval:   interval,
@@ -80,7 +83,19 @@ func (s *Scanner) Stop() {
 }
 
 func (s *Scanner) scan() {
-	err := filepath.Walk(s.recordPath, func(path string, info os.FileInfo, err error) error {
+	// Load the ingested-file index once per scan. This lets us skip re-probing
+	// unchanged files — the dominant CPU cost when many segments accumulate.
+	ingested, err := s.repo.ListFileSizes()
+	if err != nil {
+		logger.Errorf("scanner: list ingested file sizes: %v", err)
+		ingested = map[string]int64{}
+	}
+
+	// Cache media_mtx_path -> camera within a single scan: many segments share
+	// the same path, so this collapses N DB lookups into 1 per camera.
+	camCache := make(map[string]*model.Camera)
+
+	err = filepath.Walk(s.recordPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			logger.Errorf("scanner: walk error %s: %v", path, err)
 			return nil
@@ -100,9 +115,14 @@ func (s *Scanner) scan() {
 			return nil
 		}
 
+		// Incremental skip: already ingested and unchanged → no re-probe.
+		if size, ok := ingested[path]; ok && size == info.Size() {
+			return nil
+		}
+
 		// Fallback path: status is heuristic (unknown completion), so pass
 		// knownComplete=false.
-		if err := s.ingest(path, info, false); err != nil {
+		if err := s.ingest(path, info, false, camCache); err != nil {
 			logger.Debugf("scanner: %v", err)
 		}
 		return nil
@@ -128,15 +148,16 @@ func (s *Scanner) IngestFile(path string, knownComplete bool) error {
 	if !strings.HasSuffix(strings.ToLower(info.Name()), ".mp4") {
 		return fmt.Errorf("not an mp4 segment: %s", path)
 	}
-	return s.ingest(path, info, knownComplete)
+	return s.ingest(path, info, knownComplete, nil)
 }
 
 // ingest resolves the owning camera, probes the file, and upserts the record.
-func (s *Scanner) ingest(path string, info os.FileInfo, knownComplete bool) error {
+// camCache is an optional per-scan cache (nil for single-file hook ingestion).
+func (s *Scanner) ingest(path string, info os.FileInfo, knownComplete bool, camCache map[string]*model.Camera) error {
 	// Parent directory is the MediaMTX path name (e.g. "cam-a1b2c3d4").
-	// Resolve it to the full camera UUID via DB lookup.
+	// Resolve it to the full camera UUID, consulting the cache first.
 	mtxPath := filepath.Base(filepath.Dir(path))
-	cam, err := s.camLookup.FindByMediaMTXPath(mtxPath)
+	cam, err := s.resolveCamera(mtxPath, camCache)
 	if err != nil {
 		return fmt.Errorf("no camera found for path %q (file %s)", mtxPath, path)
 	}
@@ -148,6 +169,24 @@ func (s *Scanner) ingest(path string, info os.FileInfo, knownComplete bool) erro
 
 	// Background context for upsert (not request-scoped)
 	return s.svc.Upsert(context.Background(), rec)
+}
+
+// resolveCamera returns the camera for a MediaMTX path, using and populating
+// the per-scan cache when non-nil (hook ingestion passes nil).
+func (s *Scanner) resolveCamera(mtxPath string, cache map[string]*model.Camera) (*model.Camera, error) {
+	if cache != nil {
+		if cam, ok := cache[mtxPath]; ok {
+			return cam, nil
+		}
+	}
+	cam, err := s.camLookup.FindByMediaMTXPath(mtxPath)
+	if err != nil {
+		return nil, err
+	}
+	if cache != nil {
+		cache[mtxPath] = cam
+	}
+	return cam, nil
 }
 
 func (s *Scanner) probeAndCreate(path string, cam *model.Camera, mtxPath string, info os.FileInfo, knownComplete bool) (*model.Recording, error) {

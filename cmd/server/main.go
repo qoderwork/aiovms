@@ -140,7 +140,7 @@ func main() {
 	wg.Add(1)
 	go func() { defer wg.Done(); reconciler.Run() }()
 
-	recScanner := recording.NewScanner(recSvc, cfg.Recording.Path, camRepo,
+	recScanner := recording.NewScanner(recSvc, recRepo, cfg.Recording.Path, camRepo,
 		time.Duration(cfg.Recording.ScanIntervalSec)*time.Second)
 	wg.Add(1)
 	go func() { defer wg.Done(); recScanner.Run() }()

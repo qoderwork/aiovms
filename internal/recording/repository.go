@@ -21,6 +21,10 @@ type Repository interface {
 	Delete(rec *model.Recording) error
 	DeleteByIDs(ids []string) error
 	FindByPath(filePath string) (*model.Recording, error)
+	// ListFileSizes returns a map of file_path -> file_size for all recordings.
+	// Used by the scanner to skip re-probing files that are already ingested
+	// and unchanged (avoids repeated MP4 box parsing on every scan cycle).
+	ListFileSizes() (map[string]int64, error)
 	FindOlderThan(cutoff time.Time) ([]model.Recording, error)
 	FindOlderThanByStatus(cutoff time.Time, status string) ([]model.Recording, error)
 	FindOldestComplete(limit int) ([]model.Recording, error)
@@ -113,6 +117,27 @@ func (r *repository) FindByPath(filePath string) (*model.Recording, error) {
 		return nil, err
 	}
 	return &rec, nil
+}
+
+// ListFileSizes loads all ingested recording paths and their sizes in one
+// query. The scanner uses this as an in-memory index to skip re-probing
+// unchanged files, avoiding thousands of ProbeMP4 (box parsing) calls per scan.
+func (r *repository) ListFileSizes() (map[string]int64, error) {
+	var rows []struct {
+		FilePath string `gorm:"column:file_path"`
+		FileSize int64  `gorm:"column:file_size"`
+	}
+	err := r.db.Model(&model.Recording{}).
+		Select("file_path", "file_size").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		m[row.FilePath] = row.FileSize
+	}
+	return m, nil
 }
 
 func (r *repository) FindOlderThan(cutoff time.Time) ([]model.Recording, error) {

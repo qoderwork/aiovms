@@ -90,6 +90,7 @@ func (m *mockRepo) DeleteByIDs(ids []string) error {
 	return nil
 }
 func (m *mockRepo) FindByPath(filePath string) (*model.Recording, error)      { return nil, nil }
+func (m *mockRepo) ListFileSizes() (map[string]int64, error)                  { return nil, nil }
 func (m *mockRepo) FindOlderThan(cutoff time.Time) ([]model.Recording, error) { return nil, nil }
 func (m *mockRepo) FindOlderThanByStatus(cutoff time.Time, status string) ([]model.Recording, error) {
 	return nil, nil
