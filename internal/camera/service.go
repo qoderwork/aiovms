@@ -510,9 +510,6 @@ func validateCamera(cam *model.Camera) error {
 	if cam.Port < 1 || cam.Port > 65535 {
 		return apperror.ErrInvalidInput.WithMessage("port must be 1-65535")
 	}
-	if cam.Protocol != "RTSP" && cam.Protocol != "ONVIF" {
-		return apperror.ErrInvalidInput.WithMessage("protocol must be RTSP or ONVIF")
-	}
 	if cam.StreamURL == "" {
 		return apperror.ErrInvalidInput.WithMessage("stream_url is required")
 	}
