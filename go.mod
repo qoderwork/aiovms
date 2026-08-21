@@ -1,6 +1,6 @@
 module aiovms
 
-go 1.25.0
+go 1.27.0
 
 require (
 	github.com/0x524a/onvif-go v1.1.4
