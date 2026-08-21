@@ -42,6 +42,7 @@ type trackAccum struct {
 	codec       string
 	sps, pps    []byte
 	vps         []byte
+	trackID     uint32
 	sttsEntries []mp4.SttsEntry
 	stszSizes   []uint32
 	stszUniform uint32
@@ -49,6 +50,14 @@ type trackAccum struct {
 	stscEntries []mp4.StscEntry
 	stcoOffsets []uint32
 	co64Offsets []uint64
+}
+
+// fragAccum holds accumulated sample count and duration for one track across
+// all moof/traf/trun boxes (fragmented MP4 / fMP4). When the moov sample
+// table is empty, this is the source of truth for SampleCount/Duration.
+type fragAccum struct {
+	samples  uint32
+	duration uint64 // in timescale units of the track
 }
 
 // ParseSegment reads an MP4 file and extracts codec config, sample tables,
@@ -74,6 +83,16 @@ func ParseSegment(filePath string) (*SegmentInfo, error) {
 	var mdatOffset, mdatSize int64
 	var tracks []*trackAccum
 	var current *trackAccum
+
+	// fMP4 accumulation: when the moov sample table is empty (fragmented MP4),
+	// samples live in moof/traf/trun boxes. We accumulate per-track sample
+	// count and duration across all trun boxes, then synthesize a minimal
+	// SegmentInfo for the video track.
+	var (
+		fragByTrack  = map[uint32]*fragAccum{}
+		lastTfhdID   uint32
+		lastTfhdDur  uint32
+	)
 
 	_, err = mp4.ReadBoxStructure(f, func(h *mp4.ReadHandle) (interface{}, error) {
 		boxType := h.BoxInfo.Type.String()
@@ -111,11 +130,36 @@ func ParseSegment(filePath string) (*SegmentInfo, error) {
 			return nil, err
 		}
 
+		// fMP4 fragment boxes (moof/traf/tfhd/trun) are outside any trak —
+		// accumulate per-track sample count + duration for later synthesis.
+		switch b := box.(type) {
+		case *mp4.Tfhd:
+			lastTfhdID = b.TrackID
+			lastTfhdDur = b.DefaultSampleDuration
+		case *mp4.Trun:
+			fa := fragByTrack[lastTfhdID]
+			if fa == nil {
+				fa = &fragAccum{}
+				fragByTrack[lastTfhdID] = fa
+			}
+			fa.samples += b.SampleCount
+			var sumDur uint64
+			for _, e := range b.Entries {
+				sumDur += uint64(e.SampleDuration)
+			}
+			if sumDur == 0 && lastTfhdDur != 0 {
+				sumDur = uint64(b.SampleCount) * uint64(lastTfhdDur)
+			}
+			fa.duration += sumDur
+		}
+
 		if current == nil {
 			return h.Expand()
 		}
 
 		switch b := box.(type) {
+		case *mp4.Tkhd:
+			current.trackID = b.TrackID
 		case *mp4.Hdlr:
 			current.handlerType = b.HandlerType
 		case *mp4.Mdhd:
@@ -187,7 +231,23 @@ func ParseSegment(filePath string) (*SegmentInfo, error) {
 		return nil, fmt.Errorf("parse MP4 %s: no mdhd box found", filePath)
 	}
 	if videoTrack.sampleCount == 0 {
-		return nil, fmt.Errorf("parse MP4 %s: no samples in segment", filePath)
+		// fMP4: samples live in moof/trun, not in moov sample table.
+		// Synthesize a minimal SegmentInfo from the accumulated trun data.
+		fa := fragByTrack[videoTrack.trackID]
+		if fa == nil || fa.samples == 0 {
+			return nil, fmt.Errorf("parse MP4 %s: no samples in segment", filePath)
+		}
+		totalDur := time.Duration(fa.duration) * time.Second / time.Duration(videoTrack.timescale)
+		return &SegmentInfo{
+			Codec:         videoTrack.codec,
+			SPS:           videoTrack.sps,
+			PPS:           videoTrack.pps,
+			VPS:           videoTrack.vps,
+			Timescale:     videoTrack.timescale,
+			SampleCount:   int(fa.samples),
+			TotalDuration: totalDur,
+			FilePath:      filePath,
+		}, nil
 	}
 
 	videoSamples, err := buildTrackSamples(videoTrack)

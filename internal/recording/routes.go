@@ -12,9 +12,14 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler) {
 		recordings.POST("/cameras/:id/start", h.StartManual)
 		recordings.POST("/cameras/:id/stop", h.StopManual)
 		recordings.DELETE("/cameras/:id", h.DeleteByCamera)
-		// Self-test only: serve recorded .mp4 files so the playback URL returned by
-		// Get() is directly openable in a browser. Production serves via the integrated
-		// deployment layer (Java NMS backend / its nginx), not aiovms.
-		recordings.GET("/files/*filepath", h.ServeRecording)
 	}
+}
+
+// RegisterPublicRoutes registers routes that must bypass tenant middleware.
+// Only the self-test file serving route belongs here — it serves recorded .mp4
+// files so the playback URL returned by Get() is directly openable in a browser
+// (Chrome <video> + HTTP Range → seek/scrub works for fMP4). Production serves
+// via the integrated deployment layer (Java NMS backend / its nginx), not aiovms.
+func RegisterPublicRoutes(router *gin.Engine, h *Handler) {
+	router.GET("/recordings/files/*filepath", h.ServeRecording)
 }

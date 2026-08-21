@@ -204,6 +204,13 @@ func main() {
 	router.POST("/internal/segments/complete",
 		recording.NewHookHandler(recScanner).HandleSegmentComplete)
 
+	// Self-test only: serve recorded .mp4 files bypassing tenant middleware so
+	// the playback URL returned by Get() is directly openable in a browser
+	// (Chrome <video> + HTTP Range). Production serves via the integrated
+	// deployment layer (Java NMS backend / its nginx), not aiovms.
+	recHandler := recording.NewHandler(recSvc, cfg.Recording.Path)
+	recording.RegisterPublicRoutes(router, recHandler)
+
 	// Prometheus metrics（公开端点，无需租户头）
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
@@ -211,7 +218,7 @@ func main() {
 	api.Use(middleware.TenantHeaderMiddleware())
 	{
 		camera.RegisterRoutes(api, camera.NewHandler(cameraSvc))
-		recording.RegisterRoutes(api, recording.NewHandler(recSvc, cfg.Recording.Path))
+		recording.RegisterRoutes(api, recHandler)
 		schedule.RegisterRoutes(api, schedule.NewHandler(schSvc))
 	}
 
