@@ -129,7 +129,6 @@ func (s *service) rejectH265(cam *model.Camera) error {
 }
 
 type StreamURLs struct {
-	FLV    string `json:"flv"`
 	HLS    string `json:"hls"`
 	WebRTC string `json:"webrtc"`
 }
@@ -345,7 +344,6 @@ func (s *service) GetStreamURLs(ctx context.Context, tenantID int64, id string) 
 		return nil, err
 	}
 	return &StreamURLs{
-		FLV:    fmt.Sprintf("/live/%s/stream.flv", cam.MediaMTXPath),
 		HLS:    fmt.Sprintf("/stream/%s/index.m3u8", cam.MediaMTXPath),
 		WebRTC: fmt.Sprintf("/stream/%s/", cam.MediaMTXPath),
 	}, nil

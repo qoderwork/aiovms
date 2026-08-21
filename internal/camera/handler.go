@@ -282,7 +282,7 @@ func (h *Handler) Disconnect(c *gin.Context) {
 
 // Stream godoc
 // @Summary 获取全部流地址
-// @Description 返回 FLV/HLS/WebRTC 三种播放地址（一期前端默认使用 HTTP-FLV）
+// @Description 返回 HLS/WebRTC 两种播放地址
 // @Tags 摄像头管理
 // @Produce json
 // @Param id path string true "摄像头 ID"
@@ -301,30 +301,9 @@ func (h *Handler) Stream(c *gin.Context) {
 	utils.Success(c, urls)
 }
 
-// StreamFLV godoc
-// @Summary 获取 HTTP-FLV 播放地址
-// @Description 返回 MediaMTX 的 HTTP-FLV 地址（一期默认启用）
-// @Tags 摄像头管理
-// @Produce json
-// @Param id path string true "摄像头 ID"
-// @Success 200 {object} object{url=string}
-// @Failure 404 {object} utils.Response
-// @Security TenantHeader
-// @Security UserHeader
-// @Router /cameras/{id}/stream [get]
-func (h *Handler) StreamFLV(c *gin.Context) {
-	tenantID := int64(middleware.GetTenantID(c))
-	urls, err := h.svc.GetStreamURLs(c.Request.Context(), tenantID, c.Param("id"))
-	if err != nil {
-		utils.HandleError(c, err)
-		return
-	}
-	utils.Success(c, gin.H{"url": urls.FLV})
-}
-
 // StreamHLS godoc
-// @Summary 获取 HLS 播放地址（二期）
-// @Description 返回 MediaMTX 的 HLS 地址，二期开放
+// @Summary 获取 HLS 播放地址
+// @Description 返回 MediaMTX 的 HLS 地址
 // @Tags 摄像头管理
 // @Produce json
 // @Param id path string true "摄像头 ID"
@@ -344,8 +323,8 @@ func (h *Handler) StreamHLS(c *gin.Context) {
 }
 
 // StreamWebRTC godoc
-// @Summary 获取 WebRTC 播放地址（二期）
-// @Description 返回 MediaMTX 的 WebRTC 地址，二期开放
+// @Summary 获取 WebRTC 播放地址
+// @Description 返回 MediaMTX 的 WebRTC 地址
 // @Tags 摄像头管理
 // @Produce json
 // @Param id path string true "摄像头 ID"

@@ -28,6 +28,9 @@ type CameraRepo interface {
 type ScheduleRepo interface {
 	FindAllEnabled() ([]model.RecordSchedule, error)
 	Update(sch *model.RecordSchedule) error
+	// DeleteByCamera removes all schedules of a camera. Used for orphan
+	// cleanup when a camera has been deleted but its schedules remain.
+	DeleteByCamera(cameraID string) error
 }
 
 type RecordingRepo interface {
@@ -36,6 +39,10 @@ type RecordingRepo interface {
 	FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error)
 	CreateSession(sess *model.RecordingSession) error
 	CloseSession(id string, endTime time.Time) error
+	// CloseActiveSessionsByCamera closes all open sessions of a camera.
+	// Used for orphan cleanup when a camera has been deleted but its
+	// active sessions remain.
+	CloseActiveSessionsByCamera(cameraID string, endTime time.Time) error
 }
 
 // MTXReader is the read-only MediaMTX surface the reconciler uses to observe
@@ -376,7 +383,12 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 
 		cam, err := r.camRepo.FindByID(sch.CameraID)
 		if err != nil || cam == nil {
-			logger.Errorf("reconcile recording: camera %s not found for schedule %s", sch.CameraID, sch.ID)
+			// Camera has been deleted but its schedule remains (orphan).
+			// Remove the orphan schedule so we stop retrying a dead camera.
+			logger.Warnf("reconcile recording: camera %s not found for schedule %s, removing orphan schedule", sch.CameraID, sch.ID)
+			if delErr := r.schRepo.DeleteByCamera(sch.CameraID); delErr != nil {
+				logger.Errorf("reconcile recording: delete orphan schedules for camera %s: %v", sch.CameraID, delErr)
+			}
 			continue
 		}
 
@@ -452,6 +464,12 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 	for _, sess := range sessions {
 		cam, err := r.camRepo.FindByID(sess.CameraID)
 		if err != nil || cam == nil {
+			// Camera has been deleted but its active session remains (orphan).
+			// Close the orphan session so we stop retrying a dead camera.
+			logger.Warnf("reconcile recording: camera %s not found for active session %s, closing orphan session", sess.CameraID, sess.ID)
+			if closeErr := r.recRepo.CloseActiveSessionsByCamera(sess.CameraID, now); closeErr != nil {
+				logger.Errorf("reconcile recording: close orphan sessions for camera %s: %v", sess.CameraID, closeErr)
+			}
 			continue
 		}
 

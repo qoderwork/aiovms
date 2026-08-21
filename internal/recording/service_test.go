@@ -132,6 +132,9 @@ func (m *mockRepo) CloseSession(id string, endTime time.Time) error {
 	m.lastClosedAt = endTime
 	return nil
 }
+func (m *mockRepo) CloseActiveSessionsByCamera(cameraID string, endTime time.Time) error {
+	return nil
+}
 func (m *mockRepo) FindSessionByCameraAndTime(cameraID string, t time.Time) (*model.RecordingSession, error) {
 	return nil, errors.New("not found")
 }

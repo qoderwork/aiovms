@@ -71,7 +71,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.PaginatedResponse"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.PaginatedResponse"
                                 },
                                 {
                                     "type": "object",
@@ -79,7 +79,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/model.Camera"
+                                                "$ref": "#/definitions/aiovms_internal_model.Camera"
                                             }
                                         }
                                     }
@@ -90,7 +90,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -122,7 +122,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/camera.CreateCameraRequest"
+                            "$ref": "#/definitions/internal_camera.CreateCameraRequest"
                         }
                     }
                 ],
@@ -132,13 +132,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/model.Camera"
+                                            "$ref": "#/definitions/aiovms_internal_model.Camera"
                                         }
                                     }
                                 }
@@ -148,13 +148,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -182,7 +182,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
@@ -204,7 +204,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -238,7 +238,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/camera.BatchCreateRequest"
+                            "$ref": "#/definitions/internal_camera.BatchCreateRequest"
                         }
                     }
                 ],
@@ -248,7 +248,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
@@ -256,7 +256,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/camera.batchResult"
+                                                "$ref": "#/definitions/internal_camera.batchResult"
                                             }
                                         }
                                     }
@@ -267,7 +267,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -310,7 +310,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
@@ -318,7 +318,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/onvif.DiscoveredDevice"
+                                                "$ref": "#/definitions/aiovms_internal_onvif.DiscoveredDevice"
                                             }
                                         }
                                     }
@@ -329,7 +329,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -373,13 +373,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/onvif.DiscoveredDevice"
+                                            "$ref": "#/definitions/aiovms_internal_onvif.DiscoveredDevice"
                                         }
                                     }
                                 }
@@ -389,7 +389,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -433,7 +433,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
@@ -441,7 +441,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/onvif.DiscoveredDevice"
+                                                "$ref": "#/definitions/aiovms_internal_onvif.DiscoveredDevice"
                                             }
                                         }
                                     }
@@ -452,7 +452,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -480,13 +480,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -525,13 +525,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/model.Camera"
+                                            "$ref": "#/definitions/aiovms_internal_model.Camera"
                                         }
                                     }
                                 }
@@ -541,7 +541,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -580,7 +580,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/camera.UpdateCameraRequest"
+                            "$ref": "#/definitions/internal_camera.UpdateCameraRequest"
                         }
                     }
                 ],
@@ -588,19 +588,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -635,13 +635,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -678,13 +678,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -721,13 +721,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -764,61 +764,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/cameras/{id}/stream": {
-            "get": {
-                "security": [
-                    {
-                        "TenantHeader": []
-                    },
-                    {
-                        "UserHeader": []
-                    }
-                ],
-                "description": "返回 MediaMTX 的 HTTP-FLV 地址（一期默认启用）",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "摄像头管理"
-                ],
-                "summary": "获取 HTTP-FLV 播放地址",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "摄像头 ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "url": {
-                                    "type": "string"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -834,7 +786,7 @@ const docTemplate = `{
                         "UserHeader": []
                     }
                 ],
-                "description": "返回 FLV/HLS/WebRTC 三种播放地址（一期前端默认使用 HTTP-FLV）",
+                "description": "返回 HLS/WebRTC 两种播放地址",
                 "produces": [
                     "application/json"
                 ],
@@ -857,13 +809,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/camera.StreamURLs"
+                                            "$ref": "#/definitions/internal_camera.StreamURLs"
                                         }
                                     }
                                 }
@@ -873,7 +825,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -889,14 +841,14 @@ const docTemplate = `{
                         "UserHeader": []
                     }
                 ],
-                "description": "返回 MediaMTX 的 HLS 地址，二期开放",
+                "description": "返回 MediaMTX 的 HLS 地址",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "摄像头管理"
                 ],
-                "summary": "获取 HLS 播放地址（二期）",
+                "summary": "获取 HLS 播放地址",
                 "parameters": [
                     {
                         "type": "string",
@@ -921,7 +873,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -937,14 +889,14 @@ const docTemplate = `{
                         "UserHeader": []
                     }
                 ],
-                "description": "返回 MediaMTX 的 WebRTC 地址，二期开放",
+                "description": "返回 MediaMTX 的 WebRTC 地址",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "摄像头管理"
                 ],
-                "summary": "获取 WebRTC 播放地址（二期）",
+                "summary": "获取 WebRTC 播放地址",
                 "parameters": [
                     {
                         "type": "string",
@@ -969,7 +921,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -995,7 +947,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/recording.SegmentCompleteRequest"
+                            "$ref": "#/definitions/internal_recording.SegmentCompleteRequest"
                         }
                     }
                 ],
@@ -1003,13 +955,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1073,7 +1025,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.PaginatedResponse"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.PaginatedResponse"
                                 },
                                 {
                                     "type": "object",
@@ -1081,7 +1033,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/model.Recording"
+                                                "$ref": "#/definitions/aiovms_internal_model.Recording"
                                             }
                                         }
                                     }
@@ -1092,7 +1044,73 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/recordings/cameras/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "TenantHeader": []
+                    },
+                    {
+                        "UserHeader": []
+                    }
+                ],
+                "description": "删除指定摄像头的所有录像（数据库记录 + 磁盘文件）",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "录像管理"
+                ],
+                "summary": "清空摄像头录像",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "摄像头 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "deleted": {
+                                                    "type": "integer"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1129,19 +1147,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1178,19 +1196,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1229,7 +1247,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
@@ -1241,7 +1259,7 @@ const docTemplate = `{
                                                     "type": "string"
                                                 },
                                                 "recording": {
-                                                    "$ref": "#/definitions/model.Recording"
+                                                    "$ref": "#/definitions/aiovms_internal_model.Recording"
                                                 }
                                             }
                                         }
@@ -1253,7 +1271,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1288,13 +1306,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1332,7 +1350,7 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
@@ -1340,7 +1358,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/model.RecordSchedule"
+                                                "$ref": "#/definitions/aiovms_internal_model.RecordSchedule"
                                             }
                                         }
                                     }
@@ -1351,7 +1369,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1383,7 +1401,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/schedule.CreateScheduleRequest"
+                            "$ref": "#/definitions/internal_schedule.CreateScheduleRequest"
                         }
                     }
                 ],
@@ -1393,13 +1411,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/model.RecordSchedule"
+                                            "$ref": "#/definitions/aiovms_internal_model.RecordSchedule"
                                         }
                                     }
                                 }
@@ -1409,13 +1427,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1456,7 +1474,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/schedule.UpdateScheduleRequest"
+                            "$ref": "#/definitions/internal_schedule.UpdateScheduleRequest"
                         }
                     }
                 ],
@@ -1464,19 +1482,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1511,13 +1529,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1556,13 +1574,13 @@ const docTemplate = `{
                         "schema": {
                             "allOf": [
                                 {
-                                    "$ref": "#/definitions/utils.Response"
+                                    "$ref": "#/definitions/aiovms_pkg_utils.Response"
                                 },
                                 {
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/model.RecordSchedule"
+                                            "$ref": "#/definitions/aiovms_internal_model.RecordSchedule"
                                         }
                                     }
                                 }
@@ -1572,7 +1590,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/utils.Response"
+                            "$ref": "#/definitions/aiovms_pkg_utils.Response"
                         }
                     }
                 }
@@ -1580,143 +1598,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "camera.BatchCreateRequest": {
-            "type": "object",
-            "required": [
-                "cameras"
-            ],
-            "properties": {
-                "cameras": {
-                    "type": "array",
-                    "maxItems": 100,
-                    "minItems": 1,
-                    "items": {
-                        "$ref": "#/definitions/camera.CreateCameraRequest"
-                    }
-                }
-            }
-        },
-        "camera.CreateCameraRequest": {
-            "type": "object",
-            "properties": {
-                "ip": {
-                    "type": "string"
-                },
-                "latitude": {
-                    "type": "number"
-                },
-                "longitude": {
-                    "type": "number"
-                },
-                "manufacturer": {
-                    "type": "string"
-                },
-                "model": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "password": {
-                    "type": "string"
-                },
-                "port": {
-                    "type": "integer"
-                },
-                "protocol": {
-                    "description": "RTSP / ONVIF",
-                    "type": "string"
-                },
-                "site_id": {
-                    "type": "string"
-                },
-                "stream_url": {
-                    "type": "string"
-                },
-                "sub_stream_url": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "camera.StreamURLs": {
-            "type": "object",
-            "properties": {
-                "flv": {
-                    "type": "string"
-                },
-                "hls": {
-                    "type": "string"
-                },
-                "webrtc": {
-                    "type": "string"
-                }
-            }
-        },
-        "camera.UpdateCameraRequest": {
-            "type": "object",
-            "properties": {
-                "ip": {
-                    "type": "string"
-                },
-                "latitude": {
-                    "type": "number"
-                },
-                "longitude": {
-                    "type": "number"
-                },
-                "manufacturer": {
-                    "type": "string"
-                },
-                "model": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "password": {
-                    "type": "string"
-                },
-                "port": {
-                    "type": "integer"
-                },
-                "protocol": {
-                    "type": "string"
-                },
-                "site_id": {
-                    "type": "string"
-                },
-                "stream_url": {
-                    "type": "string"
-                },
-                "sub_stream_url": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "camera.batchResult": {
-            "type": "object",
-            "properties": {
-                "camera_id": {
-                    "type": "string"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "index": {
-                    "type": "integer"
-                },
-                "success": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "model.Camera": {
+        "aiovms_internal_model.Camera": {
             "type": "object",
             "properties": {
                 "codec": {
@@ -1790,7 +1672,7 @@ const docTemplate = `{
                 }
             }
         },
-        "model.RecordSchedule": {
+        "aiovms_internal_model.RecordSchedule": {
             "type": "object",
             "properties": {
                 "camera_id": {
@@ -1839,7 +1721,7 @@ const docTemplate = `{
                 }
             }
         },
-        "model.Recording": {
+        "aiovms_internal_model.Recording": {
             "type": "object",
             "properties": {
                 "camera_id": {
@@ -1899,7 +1781,7 @@ const docTemplate = `{
                 }
             }
         },
-        "onvif.DiscoveredDevice": {
+        "aiovms_internal_onvif.DiscoveredDevice": {
             "type": "object",
             "properties": {
                 "firmware": {
@@ -1932,12 +1814,12 @@ const docTemplate = `{
                 "streams": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/onvif.StreamInfo"
+                        "$ref": "#/definitions/aiovms_internal_onvif.StreamInfo"
                     }
                 }
             }
         },
-        "onvif.StreamInfo": {
+        "aiovms_internal_onvif.StreamInfo": {
             "type": "object",
             "properties": {
                 "encoding": {
@@ -1965,7 +1847,181 @@ const docTemplate = `{
                 }
             }
         },
-        "recording.SegmentCompleteRequest": {
+        "aiovms_pkg_utils.PaginatedResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "data": {
+                    "$ref": "#/definitions/aiovms_pkg_utils.pageData"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "aiovms_pkg_utils.Response": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "data": {},
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "aiovms_pkg_utils.pageData": {
+            "type": "object",
+            "properties": {
+                "list": {},
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_camera.BatchCreateRequest": {
+            "type": "object",
+            "required": [
+                "cameras"
+            ],
+            "properties": {
+                "cameras": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/internal_camera.CreateCameraRequest"
+                    }
+                }
+            }
+        },
+        "internal_camera.CreateCameraRequest": {
+            "type": "object",
+            "properties": {
+                "ip": {
+                    "type": "string"
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "longitude": {
+                    "type": "number"
+                },
+                "manufacturer": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
+                },
+                "protocol": {
+                    "description": "RTSP / ONVIF",
+                    "type": "string"
+                },
+                "site_id": {
+                    "type": "string"
+                },
+                "stream_url": {
+                    "type": "string"
+                },
+                "sub_stream_url": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_camera.StreamURLs": {
+            "type": "object",
+            "properties": {
+                "hls": {
+                    "type": "string"
+                },
+                "webrtc": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_camera.UpdateCameraRequest": {
+            "type": "object",
+            "properties": {
+                "ip": {
+                    "type": "string"
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "longitude": {
+                    "type": "number"
+                },
+                "manufacturer": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
+                },
+                "protocol": {
+                    "type": "string"
+                },
+                "site_id": {
+                    "type": "string"
+                },
+                "stream_url": {
+                    "type": "string"
+                },
+                "sub_stream_url": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_camera.batchResult": {
+            "type": "object",
+            "properties": {
+                "camera_id": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_recording.SegmentCompleteRequest": {
             "type": "object",
             "properties": {
                 "path": {
@@ -1978,7 +2034,7 @@ const docTemplate = `{
                 }
             }
         },
-        "schedule.CreateScheduleRequest": {
+        "internal_schedule.CreateScheduleRequest": {
             "type": "object",
             "required": [
                 "camera_id"
@@ -2011,7 +2067,7 @@ const docTemplate = `{
                 }
             }
         },
-        "schedule.UpdateScheduleRequest": {
+        "internal_schedule.UpdateScheduleRequest": {
             "type": "object",
             "required": [
                 "camera_id"
@@ -2038,47 +2094,6 @@ const docTemplate = `{
                 },
                 "weekdays": {
                     "type": "string"
-                }
-            }
-        },
-        "utils.PaginatedResponse": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "integer"
-                },
-                "data": {
-                    "$ref": "#/definitions/utils.pageData"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "utils.Response": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "integer"
-                },
-                "data": {},
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "utils.pageData": {
-            "type": "object",
-            "properties": {
-                "list": {},
-                "page": {
-                    "type": "integer"
-                },
-                "page_size": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
                 }
             }
         }

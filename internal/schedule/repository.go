@@ -15,6 +15,10 @@ type Repository interface {
 	// All request-facing lookups MUST use this method to enforce tenant isolation.
 	FindByIDAndTenant(id string, tenantID int64) (*model.RecordSchedule, error)
 	Delete(id string) error
+	// DeleteByCamera removes all schedules belonging to a camera. Called by
+	// the reconciler when a camera has been deleted but its schedules remain
+	// (orphan cleanup), and by camera.Delete for cascade prevention.
+	DeleteByCamera(cameraID string) error
 	FindAllEnabled() ([]model.RecordSchedule, error)
 }
 
@@ -55,6 +59,10 @@ func (r *repository) FindAll(tenantID int64, cameraID string) ([]model.RecordSch
 
 func (r *repository) Delete(id string) error {
 	return r.db.Where("id = ?", id).Delete(&model.RecordSchedule{}).Error
+}
+
+func (r *repository) DeleteByCamera(cameraID string) error {
+	return r.db.Where("camera_id = ?", cameraID).Delete(&model.RecordSchedule{}).Error
 }
 
 func (r *repository) FindAllEnabled() ([]model.RecordSchedule, error) {

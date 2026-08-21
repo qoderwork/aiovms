@@ -244,6 +244,18 @@ func (r *chaosRecRepo) CloseSession(id string, endTime time.Time) error {
 	return nil
 }
 
+func (r *chaosRecRepo) CloseActiveSessionsByCamera(cameraID string, endTime time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.sessions {
+		if r.sessions[i].CameraID == cameraID && r.sessions[i].EndTime == nil {
+			r.sessions[i].EndTime = &endTime
+			r.sessions[i].UpdatedAt = endTime
+		}
+	}
+	return nil
+}
+
 // --- intent operators -------------------------------------------------------
 //
 // startManual / stopManual mirror the ordering contracts of

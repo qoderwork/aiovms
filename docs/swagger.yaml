@@ -1,96 +1,6 @@
 basePath: /
 definitions:
-  camera.BatchCreateRequest:
-    properties:
-      cameras:
-        items:
-          $ref: '#/definitions/camera.CreateCameraRequest'
-        maxItems: 100
-        minItems: 1
-        type: array
-    required:
-    - cameras
-    type: object
-  camera.CreateCameraRequest:
-    properties:
-      ip:
-        type: string
-      latitude:
-        type: number
-      longitude:
-        type: number
-      manufacturer:
-        type: string
-      model:
-        type: string
-      name:
-        type: string
-      password:
-        type: string
-      port:
-        type: integer
-      protocol:
-        description: RTSP / ONVIF
-        type: string
-      site_id:
-        type: string
-      stream_url:
-        type: string
-      sub_stream_url:
-        type: string
-      username:
-        type: string
-    type: object
-  camera.StreamURLs:
-    properties:
-      flv:
-        type: string
-      hls:
-        type: string
-      webrtc:
-        type: string
-    type: object
-  camera.UpdateCameraRequest:
-    properties:
-      ip:
-        type: string
-      latitude:
-        type: number
-      longitude:
-        type: number
-      manufacturer:
-        type: string
-      model:
-        type: string
-      name:
-        type: string
-      password:
-        type: string
-      port:
-        type: integer
-      protocol:
-        type: string
-      site_id:
-        type: string
-      stream_url:
-        type: string
-      sub_stream_url:
-        type: string
-      username:
-        type: string
-    type: object
-  camera.batchResult:
-    properties:
-      camera_id:
-        type: string
-      error:
-        type: string
-      index:
-        type: integer
-      success:
-        type: boolean
-    type: object
-  model.Camera:
+  aiovms_internal_model.Camera:
     properties:
       codec:
         description: H.264 / H.265
@@ -140,7 +50,7 @@ definitions:
       username:
         type: string
     type: object
-  model.RecordSchedule:
+  aiovms_internal_model.RecordSchedule:
     properties:
       camera_id:
         type: string
@@ -174,7 +84,7 @@ definitions:
         description: '"1,2,3,4,5" (Sun=0)'
         type: string
     type: object
-  model.Recording:
+  aiovms_internal_model.Recording:
     properties:
       camera_id:
         type: string
@@ -215,7 +125,7 @@ definitions:
       updated_at:
         type: string
     type: object
-  onvif.DiscoveredDevice:
+  aiovms_internal_onvif.DiscoveredDevice:
     properties:
       firmware:
         type: string
@@ -237,10 +147,10 @@ definitions:
         type: array
       streams:
         items:
-          $ref: '#/definitions/onvif.StreamInfo'
+          $ref: '#/definitions/aiovms_internal_onvif.StreamInfo'
         type: array
     type: object
-  onvif.StreamInfo:
+  aiovms_internal_onvif.StreamInfo:
     properties:
       encoding:
         description: H264 / H265 / JPEG / MPEG4
@@ -260,7 +170,122 @@ definitions:
         description: encoder resolution width
         type: integer
     type: object
-  recording.SegmentCompleteRequest:
+  aiovms_pkg_utils.PaginatedResponse:
+    properties:
+      code:
+        type: integer
+      data:
+        $ref: '#/definitions/aiovms_pkg_utils.pageData'
+      message:
+        type: string
+    type: object
+  aiovms_pkg_utils.Response:
+    properties:
+      code:
+        type: integer
+      data: {}
+      message:
+        type: string
+    type: object
+  aiovms_pkg_utils.pageData:
+    properties:
+      list: {}
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  internal_camera.BatchCreateRequest:
+    properties:
+      cameras:
+        items:
+          $ref: '#/definitions/internal_camera.CreateCameraRequest'
+        maxItems: 100
+        minItems: 1
+        type: array
+    required:
+    - cameras
+    type: object
+  internal_camera.CreateCameraRequest:
+    properties:
+      ip:
+        type: string
+      latitude:
+        type: number
+      longitude:
+        type: number
+      manufacturer:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      password:
+        type: string
+      port:
+        type: integer
+      protocol:
+        description: RTSP / ONVIF
+        type: string
+      site_id:
+        type: string
+      stream_url:
+        type: string
+      sub_stream_url:
+        type: string
+      username:
+        type: string
+    type: object
+  internal_camera.StreamURLs:
+    properties:
+      hls:
+        type: string
+      webrtc:
+        type: string
+    type: object
+  internal_camera.UpdateCameraRequest:
+    properties:
+      ip:
+        type: string
+      latitude:
+        type: number
+      longitude:
+        type: number
+      manufacturer:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      password:
+        type: string
+      port:
+        type: integer
+      protocol:
+        type: string
+      site_id:
+        type: string
+      stream_url:
+        type: string
+      sub_stream_url:
+        type: string
+      username:
+        type: string
+    type: object
+  internal_camera.batchResult:
+    properties:
+      camera_id:
+        type: string
+      error:
+        type: string
+      index:
+        type: integer
+      success:
+        type: boolean
+    type: object
+  internal_recording.SegmentCompleteRequest:
     properties:
       path:
         description: Path is the MediaMTX path name (e.g. "cam-a1b2c3d4").
@@ -269,7 +294,7 @@ definitions:
         description: SegmentPath is the absolute path of the completed segment file.
         type: string
     type: object
-  schedule.CreateScheduleRequest:
+  internal_schedule.CreateScheduleRequest:
     properties:
       camera_id:
         type: string
@@ -292,7 +317,7 @@ definitions:
     required:
     - camera_id
     type: object
-  schedule.UpdateScheduleRequest:
+  internal_schedule.UpdateScheduleRequest:
     properties:
       camera_id:
         type: string
@@ -311,33 +336,6 @@ definitions:
         type: string
     required:
     - camera_id
-    type: object
-  utils.PaginatedResponse:
-    properties:
-      code:
-        type: integer
-      data:
-        $ref: '#/definitions/utils.pageData'
-      message:
-        type: string
-    type: object
-  utils.Response:
-    properties:
-      code:
-        type: integer
-      data: {}
-      message:
-        type: string
-    type: object
-  utils.pageData:
-    properties:
-      list: {}
-      page:
-        type: integer
-      page_size:
-        type: integer
-      total:
-        type: integer
     type: object
 info:
   contact:
@@ -362,7 +360,7 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
                   properties:
@@ -374,7 +372,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -407,17 +405,17 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.PaginatedResponse'
+            - $ref: '#/definitions/aiovms_pkg_utils.PaginatedResponse'
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/model.Camera'
+                    $ref: '#/definitions/aiovms_internal_model.Camera'
                   type: array
               type: object
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -434,7 +432,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/camera.CreateCameraRequest'
+          $ref: '#/definitions/internal_camera.CreateCameraRequest'
       produces:
       - application/json
       responses:
@@ -442,19 +440,19 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
-                  $ref: '#/definitions/model.Camera'
+                  $ref: '#/definitions/aiovms_internal_model.Camera'
               type: object
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -476,11 +474,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -502,15 +500,15 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
-                  $ref: '#/definitions/model.Camera'
+                  $ref: '#/definitions/aiovms_internal_model.Camera'
               type: object
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -532,22 +530,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/camera.UpdateCameraRequest'
+          $ref: '#/definitions/internal_camera.UpdateCameraRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -569,11 +567,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -595,11 +593,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -621,49 +619,20 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
       summary: 抓拍快照
       tags:
       - 摄像头管理
-  /cameras/{id}/stream:
-    get:
-      description: 返回 MediaMTX 的 HTTP-FLV 地址（一期默认启用）
-      parameters:
-      - description: 摄像头 ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            properties:
-              url:
-                type: string
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/utils.Response'
-      security:
-      - TenantHeader: []
-      - UserHeader: []
-      summary: 获取 HTTP-FLV 播放地址
-      tags:
-      - 摄像头管理
   /cameras/{id}/stream-urls:
     get:
-      description: 返回 FLV/HLS/WebRTC 三种播放地址（一期前端默认使用 HTTP-FLV）
+      description: 返回 HLS/WebRTC 两种播放地址
       parameters:
       - description: 摄像头 ID
         in: path
@@ -677,15 +646,15 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
-                  $ref: '#/definitions/camera.StreamURLs'
+                  $ref: '#/definitions/internal_camera.StreamURLs'
               type: object
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -694,7 +663,7 @@ paths:
       - 摄像头管理
   /cameras/{id}/stream/hls:
     get:
-      description: 返回 MediaMTX 的 HLS 地址，二期开放
+      description: 返回 MediaMTX 的 HLS 地址
       parameters:
       - description: 摄像头 ID
         in: path
@@ -714,16 +683,16 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
-      summary: 获取 HLS 播放地址（二期）
+      summary: 获取 HLS 播放地址
       tags:
       - 摄像头管理
   /cameras/{id}/stream/webrtc:
     get:
-      description: 返回 MediaMTX 的 WebRTC 地址，二期开放
+      description: 返回 MediaMTX 的 WebRTC 地址
       parameters:
       - description: 摄像头 ID
         in: path
@@ -743,11 +712,11 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
-      summary: 获取 WebRTC 播放地址（二期）
+      summary: 获取 WebRTC 播放地址
       tags:
       - 摄像头管理
   /cameras/batch:
@@ -761,7 +730,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/camera.BatchCreateRequest'
+          $ref: '#/definitions/internal_camera.BatchCreateRequest'
       produces:
       - application/json
       responses:
@@ -769,17 +738,17 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/camera.batchResult'
+                    $ref: '#/definitions/internal_camera.batchResult'
                   type: array
               type: object
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -804,17 +773,17 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/onvif.DiscoveredDevice'
+                    $ref: '#/definitions/aiovms_internal_onvif.DiscoveredDevice'
                   type: array
               type: object
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -840,15 +809,15 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
-                  $ref: '#/definitions/onvif.DiscoveredDevice'
+                  $ref: '#/definitions/aiovms_internal_onvif.DiscoveredDevice'
               type: object
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -874,17 +843,17 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/onvif.DiscoveredDevice'
+                    $ref: '#/definitions/aiovms_internal_onvif.DiscoveredDevice'
                   type: array
               type: object
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -900,11 +869,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -922,18 +891,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/recording.SegmentCompleteRequest'
+          $ref: '#/definitions/internal_recording.SegmentCompleteRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       summary: 分片完成回调（内部）
       tags:
       - 内部接口
@@ -970,17 +939,17 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.PaginatedResponse'
+            - $ref: '#/definitions/aiovms_pkg_utils.PaginatedResponse'
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/model.Recording'
+                    $ref: '#/definitions/aiovms_internal_model.Recording'
                   type: array
               type: object
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -1002,11 +971,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -1028,24 +997,62 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
                   properties:
                     play_url:
                       type: string
                     recording:
-                      $ref: '#/definitions/model.Recording'
+                      $ref: '#/definitions/aiovms_internal_model.Recording'
                   type: object
               type: object
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
       summary: 录像详情
+      tags:
+      - 录像管理
+  /recordings/cameras/{id}:
+    delete:
+      description: 删除指定摄像头的所有录像（数据库记录 + 磁盘文件）
+      parameters:
+      - description: 摄像头 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
+            - properties:
+                data:
+                  properties:
+                    deleted:
+                      type: integer
+                  type: object
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
+      security:
+      - TenantHeader: []
+      - UserHeader: []
+      summary: 清空摄像头录像
       tags:
       - 录像管理
   /recordings/cameras/{id}/start:
@@ -1063,15 +1070,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -1093,15 +1100,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -1123,17 +1130,17 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/model.RecordSchedule'
+                    $ref: '#/definitions/aiovms_internal_model.RecordSchedule'
                   type: array
               type: object
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -1150,7 +1157,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/schedule.CreateScheduleRequest'
+          $ref: '#/definitions/internal_schedule.CreateScheduleRequest'
       produces:
       - application/json
       responses:
@@ -1158,19 +1165,19 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
-                  $ref: '#/definitions/model.RecordSchedule'
+                  $ref: '#/definitions/aiovms_internal_model.RecordSchedule'
               type: object
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -1192,11 +1199,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -1218,22 +1225,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/schedule.UpdateScheduleRequest'
+          $ref: '#/definitions/internal_schedule.UpdateScheduleRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []
@@ -1256,15 +1263,15 @@ paths:
           description: OK
           schema:
             allOf:
-            - $ref: '#/definitions/utils.Response'
+            - $ref: '#/definitions/aiovms_pkg_utils.Response'
             - properties:
                 data:
-                  $ref: '#/definitions/model.RecordSchedule'
+                  $ref: '#/definitions/aiovms_internal_model.RecordSchedule'
               type: object
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/utils.Response'
+            $ref: '#/definitions/aiovms_pkg_utils.Response'
       security:
       - TenantHeader: []
       - UserHeader: []

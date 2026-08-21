@@ -21,7 +21,6 @@ func RegisterRoutes(rg *gin.RouterGroup, h *Handler) {
 		cameras.POST("/:id/connect", h.Connect)
 		cameras.POST("/:id/disconnect", h.Disconnect)
 		cameras.GET("/:id/stream-urls", h.Stream)
-		cameras.GET("/:id/stream", h.StreamFLV)
 		cameras.GET("/:id/stream/hls", h.StreamHLS)
 		cameras.GET("/:id/stream/webrtc", h.StreamWebRTC)
 		cameras.GET("/:id/snapshot", h.Snapshot)

@@ -76,6 +76,17 @@ func (m *mockScheduleRepo) Update(sch *model.RecordSchedule) error {
 	return nil
 }
 
+func (m *mockScheduleRepo) DeleteByCamera(cameraID string) error {
+	out := m.schedules[:0]
+	for _, s := range m.schedules {
+		if s.CameraID != cameraID {
+			out = append(out, s)
+		}
+	}
+	m.schedules = out
+	return nil
+}
+
 type mockRecRepo struct {
 	activeSessions       []model.RecordingSession
 	findActiveErr        error
@@ -138,6 +149,10 @@ func (m *mockRecRepo) CloseSession(id string, endTime time.Time) error {
 	}
 	m.lastClosedSessionID = id
 	m.lastClosedAt = endTime
+	return nil
+}
+
+func (m *mockRecRepo) CloseActiveSessionsByCamera(cameraID string, endTime time.Time) error {
 	return nil
 }
 

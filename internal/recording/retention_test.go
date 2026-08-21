@@ -99,6 +99,9 @@ func (m *mockRepoForRetention) FindActiveSessionBySchedule(scheduleID string) (*
 	return nil, nil
 }
 func (m *mockRepoForRetention) CloseSession(id string, endTime time.Time) error { return nil }
+func (m *mockRepoForRetention) CloseActiveSessionsByCamera(cameraID string, endTime time.Time) error {
+	return nil
+}
 func (m *mockRepoForRetention) FindSessionByCameraAndTime(cameraID string, t time.Time) (*model.RecordingSession, error) {
 	return nil, nil
 }

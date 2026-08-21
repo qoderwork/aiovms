@@ -495,9 +495,6 @@ func TestServiceGetStreamURLs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStreamURLs: %v", err)
 	}
-	if urls.FLV != "/live/cam-id-1/stream.flv" {
-		t.Errorf("FLV = %q", urls.FLV)
-	}
 	if urls.HLS != "/stream/cam-id-1/index.m3u8" {
 		t.Errorf("HLS = %q", urls.HLS)
 	}

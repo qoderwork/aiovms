@@ -39,6 +39,11 @@ type Repository interface {
 	FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error)
 	FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error)
 	CloseSession(id string, endTime time.Time) error
+	// CloseActiveSessionsByCamera sets end_time on all still-open sessions
+	// for a camera. Called by the reconciler when a camera has been deleted
+	// but its active sessions remain (orphan cleanup), and by camera.Delete
+	// for cascade prevention.
+	CloseActiveSessionsByCamera(cameraID string, endTime time.Time) error
 	// FindSessionByCameraAndTime returns the session whose [start_time, end_time]
 	// interval covers the given time t. Used by scanner to link an mp4 file to its
 	// originating session. Returns gorm.ErrRecordNotFound if none matches.
@@ -222,6 +227,14 @@ func (r *repository) FindActiveSessionBySchedule(scheduleID string) (*model.Reco
 func (r *repository) CloseSession(id string, endTime time.Time) error {
 	res := r.db.Model(&model.RecordingSession{}).
 		Where("id = ? AND end_time IS NULL", id).
+		Updates(map[string]any{"end_time": endTime, "updated_at": endTime})
+	return res.Error
+}
+
+// CloseActiveSessionsByCamera closes all still-open sessions of a camera.
+func (r *repository) CloseActiveSessionsByCamera(cameraID string, endTime time.Time) error {
+	res := r.db.Model(&model.RecordingSession{}).
+		Where("camera_id = ? AND end_time IS NULL", cameraID).
 		Updates(map[string]any{"end_time": endTime, "updated_at": endTime})
 	return res.Error
 }
