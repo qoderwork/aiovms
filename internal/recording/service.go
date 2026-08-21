@@ -17,6 +17,8 @@ type Service interface {
 	List(ctx context.Context, tenantID int64, cameraID, startTime, endTime string, page, pageSize int) ([]model.Recording, int64, error)
 	Get(ctx context.Context, tenantID int64, id string) (*model.Recording, string, error)
 	Delete(ctx context.Context, tenantID int64, id string) error
+	// DeleteByCamera deletes all recordings (DB rows + disk files) of a camera.
+	DeleteByCamera(ctx context.Context, tenantID int64, cameraID string) (int, error)
 	StartManual(ctx context.Context, tenantID int64, cameraID string) error
 	StopManual(ctx context.Context, tenantID int64, cameraID string) error
 	Upsert(ctx context.Context, rec *model.Recording) error
@@ -100,6 +102,37 @@ func (s *service) Delete(ctx context.Context, tenantID int64, id string) error {
 		}
 	}
 	return nil
+}
+
+// DeleteByCamera deletes all recordings (DB rows + disk files) of a camera.
+// Tenant isolation is enforced via the camera service lookup (403 if the camera
+// belongs to another tenant). Returns the number of deleted recordings.
+func (s *service) DeleteByCamera(ctx context.Context, tenantID int64, cameraID string) (int, error) {
+	// Enforce tenant isolation: the camera must belong to this tenant.
+	if _, err := s.camSvc.Get(ctx, tenantID, cameraID); err != nil {
+		return 0, err
+	}
+
+	recs, err := s.repo.FindByCamera(cameraID)
+	if err != nil {
+		return 0, apperror.Wrap(err, 50000, 500, "failed to list recordings for camera")
+	}
+
+	for i := range recs {
+		rec := &recs[i]
+		// Delete DB record first (same rationale as Delete: if os.Remove fails,
+		// the scanner re-discovers the file and upserts it back on the next cycle).
+		if err := s.repo.Delete(rec); err != nil {
+			logger.Errorf("recording delete by camera: delete row %s: %v", rec.ID, err)
+			continue
+		}
+		if rec.FilePath != "" {
+			if err := os.Remove(rec.FilePath); err != nil && !os.IsNotExist(err) {
+				logger.Warnf("recording delete by camera: remove file %s: %v", rec.FilePath, err)
+			}
+		}
+	}
+	return len(recs), nil
 }
 
 func (s *service) StartManual(ctx context.Context, tenantID int64, cameraID string) error {

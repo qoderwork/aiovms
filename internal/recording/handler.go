@@ -186,3 +186,32 @@ func (h *Handler) StopManual(c *gin.Context) {
 		"manual recording stopped", tenantID)
 	utils.Success(c, nil)
 }
+
+// DeleteByCamera godoc
+// @Summary 清空摄像头录像
+// @Description 删除指定摄像头的所有录像（数据库记录 + 磁盘文件）
+// @Tags 录像管理
+// @Produce json
+// @Param id path string true "摄像头 ID"
+// @Success 200 {object} utils.Response{data=object{deleted=int}}
+// @Failure 400 {object} utils.Response
+// @Failure 404 {object} utils.Response
+// @Security TenantHeader
+// @Security UserHeader
+// @Router /recordings/cameras/{id} [delete]
+func (h *Handler) DeleteByCamera(c *gin.Context) {
+	cameraID := c.Param("id")
+	if cameraID == "" {
+		utils.Error(c, http.StatusBadRequest, "camera id required")
+		return
+	}
+	tenantID := int64(middleware.GetTenantID(c))
+	count, err := h.svc.DeleteByCamera(c.Request.Context(), tenantID, cameraID)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	audit.Write(middleware.GetUserID(c), "recording.delete_by_camera", "camera", cameraID,
+		"deleted "+strconv.Itoa(count), tenantID)
+	utils.Success(c, gin.H{"deleted": count})
+}

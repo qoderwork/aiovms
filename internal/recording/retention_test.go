@@ -29,6 +29,9 @@ func (m *mockRepoForRetention) FindByPath(filePath string) (*model.Recording, er
 func (m *mockRepoForRetention) ListFileSizes() (map[string]int64, error) {
 	return nil, nil
 }
+func (m *mockRepoForRetention) FindByCamera(cameraID string) ([]model.Recording, error) {
+	return nil, nil
+}
 
 func (m *mockRepoForRetention) Delete(rec *model.Recording) error {
 	m.deletedPaths = append(m.deletedPaths, rec.FilePath)

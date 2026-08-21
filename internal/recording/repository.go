@@ -25,6 +25,9 @@ type Repository interface {
 	// Used by the scanner to skip re-probing files that are already ingested
 	// and unchanged (avoids repeated MP4 box parsing on every scan cycle).
 	ListFileSizes() (map[string]int64, error)
+	// FindByCamera returns all recordings of a camera (no pagination). Used by
+	// DeleteByCamera to clear all recordings of a camera.
+	FindByCamera(cameraID string) ([]model.Recording, error)
 	FindOlderThan(cutoff time.Time) ([]model.Recording, error)
 	FindOlderThanByStatus(cutoff time.Time, status string) ([]model.Recording, error)
 	FindOldestComplete(limit int) ([]model.Recording, error)
@@ -138,6 +141,13 @@ func (r *repository) ListFileSizes() (map[string]int64, error) {
 		m[row.FilePath] = row.FileSize
 	}
 	return m, nil
+}
+
+// FindByCamera returns all recordings of a camera (no pagination).
+func (r *repository) FindByCamera(cameraID string) ([]model.Recording, error) {
+	var recs []model.Recording
+	err := r.db.Where("camera_id = ?", cameraID).Find(&recs).Error
+	return recs, err
 }
 
 func (r *repository) FindOlderThan(cutoff time.Time) ([]model.Recording, error) {
