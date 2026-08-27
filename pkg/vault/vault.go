@@ -1,0 +1,242 @@
+// Package vault provides a lightweight Vault client for reading secrets
+// from HashiCorp Vault at application startup. It uses only the standard
+// library — no external SDK dependency — and supports both KV v1 and KV v2
+// secret engines, TLS with custom CA, and token-based authentication.
+//
+// Typical usage:
+//
+//	client, _ := vault.NewClient(vault.Config{
+//	    Addr:      "https://vault:8200",
+//	    Token:     os.Getenv("VAULT_TOKEN"),
+//	    Path:      "secret/data/vms", // KV v2; use "secret/vms" for v1
+//	    KVVersion: 2,
+//	})
+//	secrets, err := client.Read(client.Path())
+//	if err != nil {
+//	    log.Printf("vault read failed, falling back to config: %v", err)
+//	}
+package vault
+
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// Config holds Vault client connection settings.
+type Config struct {
+	Enabled   bool   `mapstructure:"enabled"`
+	Addr      string `mapstructure:"addr"`       // e.g. "https://vault:8200"
+	Token     string `mapstructure:"token"`     // Vault token (root or scoped)
+	Path      string `mapstructure:"path"`      // secret path, e.g. "secret/data/vms" (v2) or "secret/vms" (v1)
+	KVVersion int    `mapstructure:"kv_version"` // 1 or 2; default 2
+	CABase64  string `mapstructure:"ca_base64"`  // optional: base64-encoded PEM CA cert for HTTPS
+	Insecure  bool   `mapstructure:"insecure"`   // skip TLS verification (dev only)
+	TimeoutSec int   `mapstructure:"timeout_sec"` // HTTP timeout in seconds, default 10
+}
+
+// Client is a lightweight Vault HTTP API client.
+type Client struct {
+	cfg  Config
+	http *http.Client
+}
+
+// NewClient creates a Vault client. Returns (nil, nil) when disabled,
+// allowing callers to skip nil checks in optional-vault deployments.
+func NewClient(cfg Config) (*Client, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	if cfg.Addr == "" {
+		return nil, fmt.Errorf("vault addr is required")
+	}
+	if cfg.Token == "" {
+		return nil, fmt.Errorf("vault token is required")
+	}
+	if cfg.KVVersion == 0 {
+		cfg.KVVersion = 2 // default to KV v2
+	}
+	if cfg.TimeoutSec <= 0 {
+		cfg.TimeoutSec = 10
+	}
+
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+	if cfg.Insecure {
+		tlsConfig.InsecureSkipVerify = true
+	}
+	if cfg.CABase64 != "" {
+		caPEM, err := base64.StdEncoding.DecodeString(cfg.CABase64)
+		if err != nil {
+			return nil, fmt.Errorf("decode CA cert: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+		tlsConfig.RootCAs = pool
+	}
+
+	return &Client{
+		cfg: cfg,
+		http: &http.Client{
+			Timeout:   time.Duration(cfg.TimeoutSec) * time.Second,
+			Transport: &http.Transport{TLSClientConfig: tlsConfig},
+		},
+	}, nil
+}
+
+// Read fetches secrets at the given path. If path is empty, uses cfg.Path.
+// Uses cfg.KVVersion to determine how to parse the response.
+func (c *Client) Read(path string) (map[string]string, error) {
+	if path == "" {
+		path = c.cfg.Path
+	}
+	if path == "" {
+		return nil, fmt.Errorf("vault path is required")
+	}
+
+	url := strings.TrimRight(c.cfg.Addr, "/") + "/v1/" + strings.TrimLeft(path, "/")
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-Vault-Token", c.cfg.Token)
+	req.Header.Set("X-Vault-Request", "true")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("vault request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("vault returned %d: %s", resp.StatusCode, truncate(body, 200))
+	}
+
+	return parseSecretData(body, c.cfg.KVVersion)
+}
+
+// ReadField reads a single field from the given path. Returns empty string
+// with no error if the field exists but is empty. Returns an error if the
+// field does not exist.
+func (c *Client) ReadField(path, field string) (string, error) {
+	secrets, err := c.Read(path)
+	if err != nil {
+		return "", err
+	}
+	val, ok := secrets[field]
+	if !ok {
+		return "", fmt.Errorf("field %q not found in vault path %q", field, path)
+	}
+	return val, nil
+}
+
+// HealthCheck verifies Vault is reachable and unsealed.
+// Does NOT send the token: sys/health is unauthenticated.
+func (c *Client) HealthCheck() error {
+	url := strings.TrimRight(c.cfg.Addr, "/") + "/v1/sys/health"
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("vault unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 200 = unsealed, 429 = standby, 472 = recovery mode, 503 = sealed
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("vault is in standby mode")
+	case 472:
+		return fmt.Errorf("vault is in recovery mode")
+	case http.StatusServiceUnavailable:
+		return fmt.Errorf("vault is sealed")
+	default:
+		return fmt.Errorf("vault health check returned %d", resp.StatusCode)
+	}
+}
+
+// Path returns the configured secret path.
+func (c *Client) Path() string {
+	return c.cfg.Path
+}
+
+// parseSecretData extracts the secret key-values from a Vault API response.
+// kvVersion determines which response format to expect:
+//
+//   - KV v1: {"data": {"key": "value"}}
+//   - KV v2: {"data": {"data": {"key": "value"}, "metadata": {...}}}
+//
+// When the secret data is empty (v2 secret written with no fields, or v1
+// path deleted), returns an empty map rather than falling through to
+// metadata or erroring out.
+func parseSecretData(body []byte, kvVersion int) (map[string]string, error) {
+	if kvVersion == 1 {
+		var v1 struct {
+			Data map[string]interface{} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &v1); err != nil {
+			return nil, fmt.Errorf("decode KV v1 response: %w", err)
+		}
+		if v1.Data == nil {
+			return nil, fmt.Errorf("no data field in vault response")
+		}
+		return toStringMap(v1.Data), nil
+	}
+
+	// KV v2
+	var v2 struct {
+		Data struct {
+			Data     map[string]interface{} `json:"data"`
+			Metadata map[string]interface{} `json:"metadata"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &v2); err != nil {
+		return nil, fmt.Errorf("decode KV v2 response: %w", err)
+	}
+	if v2.Data.Data == nil {
+		return nil, fmt.Errorf("no secret data at this path (may be deleted or empty)")
+	}
+	return toStringMap(v2.Data.Data), nil
+}
+
+// toStringMap converts map[string]interface{} to map[string]string.
+func toStringMap(m map[string]interface{}) map[string]string {
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		switch val := v.(type) {
+		case string:
+			result[k] = val
+		case nil:
+			result[k] = ""
+		default:
+			result[k] = fmt.Sprintf("%v", val)
+		}
+	}
+	return result
+}
+
+func truncate(b []byte, n int) string {
+	if len(b) <= n {
+		return string(b)
+	}
+	return string(b[:n]) + "..."
+}

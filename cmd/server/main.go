@@ -30,6 +30,7 @@ import (
 	"aiovms/pkg/database"
 	"aiovms/pkg/logger"
 	_ "aiovms/pkg/metrics" // register prometheus metrics
+	"aiovms/pkg/vault"
 )
 
 // @title AIO VMS API
@@ -68,6 +69,56 @@ func main() {
 	}
 	cfg.InitLogger()
 	defer logger.Cleanup()
+
+	// 1b. Override config values from Vault (optional, with graceful fallback)
+	if cfg.Vault.Enabled {
+		vaultClient, err := vault.NewClient(vault.Config{
+			Enabled:    cfg.Vault.Enabled,
+			Addr:       cfg.Vault.Addr,
+			Token:      cfg.Vault.Token,
+			Path:       cfg.Vault.Path,
+			KVVersion:  cfg.Vault.KVVersion,
+			CABase64:   cfg.Vault.CABase64,
+			Insecure:   cfg.Vault.Insecure,
+			TimeoutSec: cfg.Vault.TimeoutSec,
+		})
+		if err != nil {
+			msg := fmt.Sprintf("vault client init: %v", err)
+			if cfg.Vault.Required {
+				logger.Fatalf("%s (vault.required=true, refusing to start)", msg)
+			}
+			logger.Warnf("%s (falling back to config.yaml values)", msg)
+		} else {
+			if err := vaultClient.HealthCheck(); err != nil {
+				msg := fmt.Sprintf("vault health check: %v", err)
+				if cfg.Vault.Required {
+					logger.Fatalf("%s (vault.required=true, refusing to start)", msg)
+				}
+				logger.Warnf("%s (falling back to config.yaml values)", msg)
+			} else if secrets, err := vaultClient.Read(cfg.Vault.Path); err != nil {
+				msg := fmt.Sprintf("vault read %s: %v", cfg.Vault.Path, err)
+				if cfg.Vault.Required {
+					logger.Fatalf("%s (vault.required=true, refusing to start)", msg)
+				}
+				logger.Warnf("%s (falling back to config.yaml values)", msg)
+			} else {
+				// Override database password from vault
+				if v, ok := secrets["database.password"]; ok && v != "" {
+					cfg.Database.Password = v
+					logger.Info("database.password loaded from vault")
+				}
+				// Override encryption key from vault (replaces VMS_ENCRYPTION_KEY env var)
+				if v, ok := secrets["encryption.key"]; ok && v != "" {
+					if err := os.Setenv("VMS_ENCRYPTION_KEY", v); err != nil {
+						logger.Errorf("set VMS_ENCRYPTION_KEY from vault: %v", err)
+					} else {
+						logger.Info("encryption.key loaded from vault")
+					}
+				}
+				logger.Info("vault integration active, secrets loaded")
+			}
+		}
+	}
 
 	// 2. Initialize database (shared MySQL with NMS)
 	dbCfg := database.Config{

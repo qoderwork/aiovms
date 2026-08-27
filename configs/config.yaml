@@ -5,12 +5,29 @@ database:
   host: mysql
   port: 3306
   user: root
-  password: root123456
+  password: root123456        # fallback when vault is disabled or unreachable
   dbname: swnms
   charset: utf8mb4
   max_idle_conns: 10
   max_open_conns: 50
   log_level: info
+
+# Vault 集成（可选）：enabled=true 时启动期从 Vault 读取敏感配置覆盖 config.yaml
+# token/addr 支持环境变量 VAULT_TOKEN / VAULT_ADDR 覆盖
+# vault 不可达时：required=false 自动回退到 config.yaml；required=true 拒绝启动
+# vault 中需写入的 key：
+#   database.password  → 覆盖 database.password
+#   encryption.key     → 覆盖 VMS_ENCRYPTION_KEY 环境变量（≥32字节）
+vault:
+  enabled: false              # 生产环境设为 true
+  required: false             # true=vault 不可达时拒绝启动（生产推荐）
+  addr: "https://vault:8200" # 或通过 VAULT_ADDR 环境变量
+  token: ""                  # 通过 VAULT_TOKEN 环境变量注入
+  path: "secret/data/vms"    # KV v2 路径；KV v1 用 "secret/vms"
+  kv_version: 2              # 1 或 2，显式声明避免探测歧义
+  ca_base64: ""              # HTTPS 自签证书的 CA PEM（base64），留空走系统证书池
+  insecure: false            # 跳过 TLS 校验（仅开发环境）
+  timeout_sec: 10            # HTTP 超时（秒）
 
 mediamtx:
   url: "http://aiovms-mediamtx:9997"

@@ -1,7 +1,10 @@
 # Multi-stage build
 FROM golang:1.27-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates tzdata
+RUN echo "https://mirrors.aliyun.com/alpine/v3.24/main" > /etc/apk/repositories \
+    && echo "https://mirrors.aliyun.com/alpine/v3.24/community" >> /etc/apk/repositories \
+    && apk add --no-cache git ca-certificates tzdata
+
 
 WORKDIR /build
 
@@ -16,7 +19,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /vms ./cmd/server
 
 FROM alpine:3.24
 
-RUN apk add --no-cache ca-certificates tzdata \
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache ca-certificates tzdata \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone
 

@@ -11,9 +11,26 @@ type Config struct {
 	Server    ServerConfig    `mapstructure:"server"`
 	CORS      CORSConfig      `mapstructure:"cors"`
 	Database  DatabaseConfig  `mapstructure:"database"`
+	Vault     VaultConfig     `mapstructure:"vault"`
 	Logger    LoggerConfig    `mapstructure:"logger"`
 	MediaMTX  MediaMTXConfig  `mapstructure:"mediamtx"`
 	Recording RecordingConfig `mapstructure:"recording"`
+}
+
+// VaultConfig defines Vault integration settings. When Enabled is true,
+// the application reads secrets from Vault at startup and overrides
+// corresponding config.yaml values. If Required is true and Vault is
+// unreachable, the application exits instead of falling back.
+type VaultConfig struct {
+	Enabled   bool   `mapstructure:"enabled"`
+	Required  bool   `mapstructure:"required"`    // if true, vault failure is fatal
+	Addr      string `mapstructure:"addr"`       // e.g. "https://vault:8200"
+	Token     string `mapstructure:"token"`      // VAULT_TOKEN env var
+	Path      string `mapstructure:"path"`       // e.g. "secret/data/vms" (KV v2)
+	KVVersion int    `mapstructure:"kv_version"`  // 1 or 2; default 2
+	CABase64  string `mapstructure:"ca_base64"`   // optional base64 PEM CA cert
+	Insecure  bool   `mapstructure:"insecure"`    // skip TLS verify (dev only)
+	TimeoutSec int   `mapstructure:"timeout_sec"` // HTTP timeout in seconds, default 10
 }
 
 type ServerConfig struct {
@@ -78,10 +95,20 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.max_open_conns", 50)
 	v.SetDefault("database.log_level", "info")
+	v.SetDefault("vault.enabled", false)
+	v.SetDefault("vault.required", false)
+	v.SetDefault("vault.insecure", false)
+	v.SetDefault("vault.timeout_sec", 10)
+	v.SetDefault("vault.kv_version", 2)
+	v.SetDefault("vault.path", "secret/data/vms")
 	v.SetDefault("recording.retention_days", 7)
 	v.SetDefault("recording.disk_watermark", 90)
 	v.SetDefault("recording.segment_duration", "1m")
 	v.SetDefault("recording.scan_interval_sec", 30)
+
+	// Allow VAULT_TOKEN / VAULT_ADDR env vars to override config.yaml values
+	v.BindEnv("vault.token", "VAULT_TOKEN")
+	v.BindEnv("vault.addr", "VAULT_ADDR")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -108,6 +135,21 @@ func (c *Config) Validate() error {
 	}
 	if c.MediaMTX.URL == "" {
 		return fmt.Errorf("mediamtx.url is required")
+	}
+	if c.Vault.Enabled {
+		if c.Vault.Addr == "" {
+			return fmt.Errorf("vault.addr is required when vault.enabled is true")
+		}
+		if c.Vault.Path == "" {
+			return fmt.Errorf("vault.path is required when vault.enabled is true")
+		}
+		// kv_version: 0 means unset and defaults to 2 in vault.NewClient
+		if c.Vault.KVVersion < 0 || c.Vault.KVVersion > 2 {
+			return fmt.Errorf("vault.kv_version must be 1 or 2, got %d", c.Vault.KVVersion)
+		}
+		if c.Vault.TimeoutSec < 0 {
+			return fmt.Errorf("vault.timeout_sec must be >= 0, got %d", c.Vault.TimeoutSec)
+		}
 	}
 	return nil
 }

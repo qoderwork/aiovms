@@ -59,6 +59,9 @@ services:
     environment:
       TZ: Asia/Shanghai
       VMS_ENCRYPTION_KEY: "e587e6f46b4dd28a58a8367c8f90d424"  # 生产环境需替换为强密钥
+      # Vault 集成（可选）：通过环境变量注入 token/addr，覆盖 config.yaml 中的值
+      # VAULT_TOKEN: ${VAULT_TOKEN}
+      # VAULT_ADDR: "https://vault:8200"
     ports:
       - "8081:8081"
     volumes:
