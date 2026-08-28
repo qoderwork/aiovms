@@ -239,6 +239,55 @@ func TestReadWithRetry_EmptyScheduleSingleAttempt(t *testing.T) {
 	}
 }
 
+func TestReadWithRetry_ContextDeadlineKeepsLastError(t *testing.T) {
+	// Vault stays sealed; the context deadline fires during the backoff
+	// sleep. The error must carry both the deadline and the last vault
+	// error, so operators can tell sealed from unreachable.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	backoff := []time.Duration{time.Second, time.Second}
+	_, err := c.ReadWithRetry(ctx, backoff, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error should wrap context.DeadlineExceeded, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sealed") {
+		t.Errorf("error should keep last vault error (sealed), got: %v", err)
+	}
+}
+
+func TestRetryCeiling(t *testing.T) {
+	// Default schedule + default timeout: 107s waits + 6 attempts * 2 * 10s
+	// + 30s margin = 257s.
+	got := RetryCeiling(DefaultRetryBackoff, 10*time.Second)
+	if want := 257 * time.Second; got != want {
+		t.Errorf("RetryCeiling(default, 10s) = %v, want %v", got, want)
+	}
+	// Nil backoff, 5s timeout: 1 attempt * 2 * 5s + 30s margin = 40s.
+	if got := RetryCeiling(nil, 5*time.Second); got != 40*time.Second {
+		t.Errorf("RetryCeiling(nil, 5s) = %v, want 40s", got)
+	}
+	// Non-positive timeout falls back to the 10s default.
+	if got := RetryCeiling(nil, 0); got != 50*time.Second {
+		t.Errorf("RetryCeiling(nil, 0) = %v, want 50s (default timeout)", got)
+	}
+	// Larger timeout must yield a proportionally larger ceiling: the
+	// ceiling never truncates the schedule it was sized for.
+	small := RetryCeiling(DefaultRetryBackoff, 10*time.Second)
+	large := RetryCeiling(DefaultRetryBackoff, 30*time.Second)
+	if large <= small {
+		t.Errorf("ceiling must grow with timeout: %v !> %v", large, small)
+	}
+}
+
 func TestIsRetryable(t *testing.T) {
 	// Closed server => connection refused => transport error => retryable.
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))

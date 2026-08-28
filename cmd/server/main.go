@@ -102,10 +102,11 @@ func main() {
 			if cfg.Vault.Required {
 				backoff = vault.DefaultRetryBackoff
 			}
-			// Overall ceiling so the retry loop can't hang forever
-			// regardless of backoff. ~3 minutes covers the default
-			// backoff (≈107s) plus HTTP timeouts on each attempt.
-			vaultCtx, vaultCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			// Hang-guard: overall ceiling derived from the retry schedule
+			// and HTTP timeout, so the loop can't block startup forever and
+			// never truncates the schedule it was sized for.
+			httpTimeout := time.Duration(cfg.Vault.TimeoutSec) * time.Second
+			vaultCtx, vaultCancel := context.WithTimeout(context.Background(), vault.RetryCeiling(backoff, httpTimeout))
 			secrets, err := vaultClient.ReadWithRetry(vaultCtx, backoff, loggerAdapter{})
 			vaultCancel()
 			if err != nil {

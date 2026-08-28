@@ -84,6 +84,26 @@ type SimpleLogger interface {
 	Warnf(format string, args ...interface{})
 }
 
+// RetryCeiling returns a recommended overall context deadline for a
+// ReadWithRetry call with the given backoff schedule and per-request HTTP
+// timeout. It sums all backoff waits plus a worst case of two HTTP round
+// trips (health check + read) per attempt, plus a 30s margin.
+//
+// Deriving the ceiling from the schedule avoids a hardcoded constant that
+// silently truncates the last retry attempts when timeout or backoff grow.
+// timeout <= 0 is treated as the NewClient default of 10s.
+func RetryCeiling(backoff []time.Duration, timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	attempts := len(backoff) + 1
+	var wait time.Duration
+	for _, d := range backoff {
+		wait += d
+	}
+	return wait + time.Duration(attempts)*2*timeout + 30*time.Second
+}
+
 // Config holds Vault client connection settings.
 type Config struct {
 	Enabled    bool   `mapstructure:"enabled"`
@@ -237,7 +257,9 @@ func (c *Client) ReadWithRetry(ctx context.Context, backoff []time.Duration, log
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			// Include lastErr: a bare "context deadline exceeded" hides
+			// whether vault was sealed, unreachable, or something else.
+			return nil, fmt.Errorf("%w (last error: %v)", ctx.Err(), lastErr)
 		case <-time.After(sleep):
 		}
 	}
