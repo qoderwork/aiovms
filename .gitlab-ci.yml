@@ -1,0 +1,224 @@
+variables:
+  DOCKER_REGISTRY: 20.1.0.201:25000
+  NAMESPACE: aio
+  PROJECT_NAME: appserv
+  BRANCH_NAME: $CI_COMMIT_REF_NAME
+  TAG: $CI_COMMIT_REF_NAME
+  TAG_SLUG: $CI_COMMIT_REF_SLUG
+  IMAGE_NAME: $NAMESPACE/$PROJECT_NAME
+  INIT_SERVER_IMAGE_NAME: $NAMESPACE/init_server
+  SONAR_HOST_URL: http://20.1.0.201:29000
+  BUILD_PATH: /builds/aio/appserv
+
+stages:
+  - build
+  - push
+  - deploy
+  - pack
+  - scan
+
+check_han:
+  stage: build
+  tags:
+    - docker
+  script:
+    - 'chmod +x check_han.sh'
+    - './check_han.sh'
+  only:
+    - branches
+  only:
+    - /^feature\/.*$/
+    - /^release\/.*$/
+    - /^hotfix\/.*$/
+    - /^develop$/
+
+build_image_testing:
+  stage: build
+  tags:
+    - docker
+  script:
+    - 'chmod +x update_version.sh'
+    - './update_version.sh ${TAG_SLUG}'
+    - 'echo "build: ${IMAGE_NAME}:${TAG_SLUG}"'
+    - 'docker build -t "${IMAGE_NAME}:${TAG_SLUG}" -f ./Dockerfile ./'
+#    - 'docker build -t "${INIT_SERVER_IMAGE_NAME}:${TAG_SLUG}" -f ./InitServerDockerFile ./'
+  only:
+    - branches
+  only:
+    - /^feature\/.*$/
+    - /^release\/.*$/
+    - /^hotfix\/.*$/
+    - /^develop$/
+
+push_image_testing:
+  stage: push
+  tags:
+    - docker
+  script:
+    - 'echo "push: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG_SLUG}"'
+    - 'docker tag ${IMAGE_NAME}:${TAG_SLUG} ${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG_SLUG}'
+    - 'docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG_SLUG}'
+    - 'docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG_SLUG}'
+#    - 'docker tag ${INIT_SERVER_IMAGE_NAME}:${TAG_SLUG} ${DOCKER_REGISTRY}/${INIT_SERVER_IMAGE_NAME}:${TAG_SLUG}'
+#    - 'docker push ${DOCKER_REGISTRY}/${INIT_SERVER_IMAGE_NAME}:${TAG_SLUG}'
+#    - 'docker rmi ${DOCKER_REGISTRY}/${INIT_SERVER_IMAGE_NAME}:${TAG_SLUG}'
+  only:
+    - branches
+  only:
+    - /^feature\/.*$/
+    - /^release\/.*$/
+    - /^hotfix\/.*$/
+    - /^develop$/
+
+build_image:
+  stage: build
+  tags:
+    - docker
+  script:
+    - 'chmod +x update_version.sh'
+    - './update_version.sh ${TAG}'
+    - 'echo "build: ${IMAGE_NAME}:${TAG}"'
+    - 'docker build -t "${IMAGE_NAME}:${TAG}" -f ./Dockerfile ./'
+    - 'docker tag ${IMAGE_NAME}:${TAG} ${IMAGE_NAME}:latest'
+#    - 'docker build -t "${INIT_SERVER_IMAGE_NAME}:${TAG}" -f ./InitServerDockerFile ./'
+#    - 'docker tag ${INIT_SERVER_IMAGE_NAME}:${TAG} ${INIT_SERVER_IMAGE_NAME}:latest'
+  only:
+    - tags
+
+
+push_image:
+  stage: push
+  tags:
+    - docker
+  script:
+    - 'echo "push: ${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG}"'
+    - 'docker tag ${IMAGE_NAME}:${TAG} ${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG}'
+    - 'docker tag ${IMAGE_NAME}:latest ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest'
+    - 'docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG}'
+    - 'docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest'
+    - 'docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:${TAG}'
+    - 'docker rmi ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest'
+
+ #   - 'docker tag ${INIT_SERVER_IMAGE_NAME}:${TAG} ${DOCKER_REGISTRY}/${INIT_SERVER_IMAGE_NAME}:${TAG}'
+ #   - 'docker tag ${INIT_SERVER_IMAGE_NAME}:latest ${DOCKER_REGISTRY}/${INIT_SERVER_IMAGE_NAME}:latest'
+ #   - 'docker push ${DOCKER_REGISTRY}/${INIT_SERVER_IMAGE_NAME}:${TAG}'
+ #   - 'docker push ${DOCKER_REGISTRY}/${INIT_SERVER_IMAGE_NAME}:latest'
+ #   - 'docker rmi ${DOCKER_REGISTRY}/${INIT_SERVER_IMAGE_NAME}:${TAG}'
+ #   - 'docker rmi ${DOCKER_REGISTRY}/${INIT_SERVER_IMAGE_NAME}:latest'
+    - 'docker image prune -f'
+  only:
+    - master
+  only:
+    - tags
+
+
+deploy_dev:
+  stage: deploy
+  tags:
+    - ssh-204
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - 'echo "deploy on develop server: ${IMAGE_NAME}:${TAG_SLUG}"'
+    - 'docker pull ${IMAGE_NAME}:${TAG_SLUG}'
+    - 'cd /home/swomc/aio/nms'
+    - 'sh start.sh'
+#    - 'cd /home/swomc/aio/init-server'
+#    - 'docker pull ${INIT_SERVER_IMAGE_NAME}:${TAG}'
+#    - 'sh start.sh'
+#    - 'docker image prune -f'
+  only:
+    - branches
+  only:
+    - /^feature\/.*$/
+    - /^release\/.*$/
+    - /^hotfix\/.*$/
+    - /^develop$/
+  allow_failure: true
+
+pack_release:
+  stage: pack
+  tags:
+    - ssh-204
+  script:
+    - 'cd /home/swomc/aio/deploy/'
+    - 'echo "pack version is ${TAG_SLUG}"'
+    - 'sh pack.sh ${TAG_SLUG}'
+#    - 'cd /home/swomc/aio/pack/init-server-install/'
+#    - 'sh pack.sh ${TAG}'
+  only:
+    - branches
+  only:
+    - /^release\/.*$/
+    - /^hotfix\/.*$/
+
+pack_tag:
+  stage: pack
+  tags:
+    - ssh-204
+  script:
+    - 'cd /home/swomc/aio/deploy/'
+    - 'echo "pack version is ${TAG}"'
+    - 'sh pack.sh ${TAG}'
+#    - 'cd /home/swomc/aio/pack/init-server-install/'
+#    - 'sh pack.sh ${TAG}'
+  only:
+    - master
+  only:
+    - tags
+
+scan-hanscanner:
+  stage: scan
+  tags:
+    - ssh-201
+  script:
+    - 'cd /home/base/scan/han-scanner'
+    - './scan.sh aio/appserv ${BRANCH_NAME} ${PROJECT_NAME} ${TAG}'
+  allow_failure: true
+
+scan-sonarqube-app-core:
+  stage: scan
+  tags:
+    - sonar-scanner-cli
+  image: maven:3.8.8
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Defines the location of the analysis task cache
+    GIT_DEPTH: "0"  # Tells git to fetch all the branches of the project, required by the analysis task
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache2
+  script:
+#    - cd ${BUILD_PATH}/server; ./update_version.sh ${REF_NAME}
+    - cd ${BUILD_PATH}/core-and-communication;
+  #    - mvn verify org.sonarsource.scanner.maven:sonar-maven-plugin:4.0.0.4121:sonar -Dmaven.test.skip=true -Dsonar.projectKey=appserv -Dsonar.host.url=http://20.1.0.201:29000 -Dsonar.login=sqp_0402465ad635dcc2892b195e96ad609beb639195
+  allow_failure: true
+  only:
+    - /^release\/.*$/
+    - /^hotfix\/.*$/
+    - /^develop$/
+    - /^(\d+\.)?(\d+\.)?(\*|\d+)$/
+
+
+scan-sonarqube-app-api:
+  stage: scan
+  tags:
+    - sonar-scanner-cli
+  image: maven:3.8.8
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Defines the location of the analysis task cache
+    GIT_DEPTH: "0"  # Tells git to fetch all the branches of the project, required by the analysis task
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache2
+  script:
+#    - cd ${BUILD_PATH}/server; ./update_version.sh ${REF_NAME}
+    - cd ${BUILD_PATH}/api;
+  #    - mvn verify org.sonarsource.scanner.maven:sonar-maven-plugin:4.0.0.4121:sonar -Dmaven.test.skip=true -Dsonar.projectKey=appserv-api -Dsonar.host.url=http://20.1.0.201:29000 -Dsonar.login=sqp_3ea52d02fe5808ab9ea9d1ffa58a8c962f48c411
+  allow_failure: true
+  only:
+    - /^release\/.*$/
+    - /^hotfix\/.*$/
+    - /^develop$/
+    - /^(\d+\.)?(\d+\.)?(\*|\d+)$/
