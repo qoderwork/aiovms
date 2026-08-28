@@ -37,9 +37,12 @@ import (
 const maxBodyBytes = 1 << 20 // 1 MiB
 
 // DefaultRetryBackoff retries transient Vault failures (container restart,
-// unseal window, network blips) over roughly one minute: 5 attempts total.
+// unseal window, network blips) over roughly 107 seconds total, covering
+// manual unseal workflows. Rough schedule: attempt 1 (immediate), wait 2s,
+// attempt 2, wait 5s, attempt 3, wait 10s, attempt 4, wait 30s, attempt 5,
+// wait 60s, final attempt 6.
 var DefaultRetryBackoff = []time.Duration{
-	2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second,
+	2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second, 60 * time.Second,
 }
 
 // StatusError represents a Vault response with a non-200 HTTP status code.
@@ -72,6 +75,13 @@ func IsRetryable(err error) bool {
 	// Transport-level errors (DNS, connection refused, timeouts) are
 	// considered transient.
 	return true
+}
+
+// SimpleLogger is the minimal logging interface expected by ReadWithRetry.
+// Pass nil to disable attempt-level logging. Compatible with aiovms'
+// pkg/logger and stdlib log.Logger via adapters.
+type SimpleLogger interface {
+	Warnf(format string, args ...interface{})
 }
 
 // Config holds Vault client connection settings.
@@ -197,7 +207,11 @@ func (c *Client) ReadField(ctx context.Context, path, field string) (string, err
 // schedule. It returns as soon as both steps succeed; non-retryable errors
 // fail fast; an exhausted schedule returns the last error wrapped with the
 // attempt count. Pass a nil/empty schedule for a single attempt.
-func (c *Client) ReadWithRetry(ctx context.Context, backoff []time.Duration) (map[string]string, error) {
+//
+// If log is non-nil each transient failure (and the subsequent wait) is
+// logged at Warn level so operators can observe the unseal / restart window
+// instead of seeing a silent pause.
+func (c *Client) ReadWithRetry(ctx context.Context, backoff []time.Duration, log SimpleLogger) (map[string]string, error) {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if lastErr = c.HealthCheck(ctx); lastErr == nil {
@@ -216,10 +230,15 @@ func (c *Client) ReadWithRetry(ctx context.Context, backoff []time.Duration) (ma
 		if attempt >= len(backoff) {
 			return nil, fmt.Errorf("after %d attempts: %w", attempt+1, lastErr)
 		}
+		sleep := backoff[attempt]
+		if log != nil {
+			log.Warnf("vault attempt %d/%d: %v — retrying in %v",
+				attempt+1, len(backoff)+1, lastErr, sleep)
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(backoff[attempt]):
+		case <-time.After(sleep):
 		}
 	}
 }
@@ -238,6 +257,10 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 		return fmt.Errorf("vault unreachable: %w", err)
 	}
 	defer resp.Body.Close()
+	// Drain and discard up to 64 KiB of the response body (sys/health
+	// responses are tiny) so the TCP connection is reusable for the
+	// subsequent Read call on keep-alive transports.
+	_, _ = io.CopyN(io.Discard, resp.Body, 64<<10)
 
 	// 200 = unsealed, 429 = standby, 472 = recovery mode, 503 = sealed
 	switch resp.StatusCode {

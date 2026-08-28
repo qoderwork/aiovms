@@ -171,7 +171,7 @@ func TestReadWithRetry_SuccessAfterTransient(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	backoff := []time.Duration{time.Millisecond, time.Millisecond}
-	secrets, err := c.ReadWithRetry(context.Background(), backoff)
+	secrets, err := c.ReadWithRetry(context.Background(), backoff, nil)
 	if err != nil {
 		t.Fatalf("ReadWithRetry: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestReadWithRetry_NonRetryableFailsFast(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	backoff := []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
-	_, err := c.ReadWithRetry(context.Background(), backoff)
+	_, err := c.ReadWithRetry(context.Background(), backoff, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -212,7 +212,7 @@ func TestReadWithRetry_ScheduleExhausted(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	backoff := []time.Duration{time.Millisecond, time.Millisecond}
-	_, err := c.ReadWithRetry(context.Background(), backoff)
+	_, err := c.ReadWithRetry(context.Background(), backoff, nil)
 	if err == nil {
 		t.Fatal("expected error after exhausting schedule")
 	}
@@ -230,7 +230,7 @@ func TestReadWithRetry_EmptyScheduleSingleAttempt(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv.URL)
-	_, err := c.ReadWithRetry(context.Background(), nil)
+	_, err := c.ReadWithRetry(context.Background(), nil, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}

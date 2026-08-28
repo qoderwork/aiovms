@@ -57,6 +57,12 @@ import (
 // @name X-User-Id
 // @description User ID, forwarded by NMS.
 
+// loggerAdapter bridges pkg/logger (package-level Warnf) to vault.SimpleLogger.
+// Declared near main to keep vault package free of pkg/logger coupling.
+type loggerAdapter struct{}
+
+func (loggerAdapter) Warnf(f string, a ...interface{}) { logger.Warnf(f, a...) }
+
 func main() {
 	configPath := flag.String("config", "", "path to config file")
 	flag.Parse()
@@ -96,7 +102,12 @@ func main() {
 			if cfg.Vault.Required {
 				backoff = vault.DefaultRetryBackoff
 			}
-			secrets, err := vaultClient.ReadWithRetry(context.Background(), backoff)
+			// Overall ceiling so the retry loop can't hang forever
+			// regardless of backoff. ~3 minutes covers the default
+			// backoff (≈107s) plus HTTP timeouts on each attempt.
+			vaultCtx, vaultCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			secrets, err := vaultClient.ReadWithRetry(vaultCtx, backoff, loggerAdapter{})
+			vaultCancel()
 			if err != nil {
 				msg := fmt.Sprintf("vault: %v", err)
 				if cfg.Vault.Required {
