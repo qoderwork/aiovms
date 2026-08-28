@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 
 	"aiovms/pkg/logger"
 	"github.com/spf13/viper"
@@ -109,6 +110,19 @@ func Load(configPath string) (*Config, error) {
 	// Allow VAULT_TOKEN / VAULT_ADDR env vars to override config.yaml values
 	v.BindEnv("vault.token", "VAULT_TOKEN")
 	v.BindEnv("vault.addr", "VAULT_ADDR")
+
+	// database.password supports VMS_DB_PASSWORD env injection.
+	// Final precedence: vault (main.go override, applied after Unmarshal) >
+	// env (viper) > config.yaml.
+	v.BindEnv("database.password", "VMS_DB_PASSWORD")
+
+	// Viper ignores empty env values by default (allowEmptyEnv=false), so an
+	// explicitly-set-but-empty VMS_DB_PASSWORD silently falls back to
+	// config.yaml. Warn here (logger is not initialized yet) to avoid
+	// confusion in production.
+	if val, ok := os.LookupEnv("VMS_DB_PASSWORD"); ok && val == "" {
+		fmt.Fprintln(os.Stderr, "warning: VMS_DB_PASSWORD is set but empty; ignored, database.password falls back to config.yaml")
+	}
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config: %w", err)

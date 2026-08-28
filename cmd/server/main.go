@@ -63,6 +63,18 @@ type loggerAdapter struct{}
 
 func (loggerAdapter) Warnf(f string, a ...interface{}) { logger.Warnf(f, a...) }
 
+// databasePasswordSource reports where the effective DB password came from.
+// Only the source is logged — never the secret itself.
+func databasePasswordSource(fromVault bool) string {
+	if fromVault {
+		return "vault"
+	}
+	if v, ok := os.LookupEnv("VMS_DB_PASSWORD"); ok && v != "" {
+		return "env"
+	}
+	return "config.yaml"
+}
+
 func main() {
 	configPath := flag.String("config", "", "path to config file")
 	flag.Parse()
@@ -77,6 +89,7 @@ func main() {
 	defer logger.Cleanup()
 
 	// 1b. Override config values from Vault (optional, with graceful fallback)
+	passwordFromVault := false
 	if cfg.Vault.Enabled {
 		vaultClient, err := vault.NewClient(vault.Config{
 			Enabled:    cfg.Vault.Enabled,
@@ -119,6 +132,7 @@ func main() {
 				// Override database password from vault
 				if v, ok := secrets["database.password"]; ok && v != "" {
 					cfg.Database.Password = v
+					passwordFromVault = true
 					logger.Info("database.password loaded from vault")
 				}
 				// Override encryption key from vault (replaces VMS_ENCRYPTION_KEY env var)
@@ -133,6 +147,9 @@ func main() {
 			}
 		}
 	}
+
+	// 1c. Report effective secret source for operational debugging (never the value itself)
+	logger.Infof("database.password source: %s", databasePasswordSource(passwordFromVault))
 
 	// 2. Initialize database (shared MySQL with NMS)
 	dbCfg := database.Config{

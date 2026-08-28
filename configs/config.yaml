@@ -5,7 +5,14 @@ database:
   host: mysql
   port: 3306
   user: root
-  password: root123456        # fallback when vault is disabled or unreachable
+  # 密码优先级：vault > env(VMS_DB_PASSWORD) > 本文件。
+  # 本值仅作最后兜底，是否留空取决于部署形态：
+  #   - 生产强依赖 vault（推荐）：vault.enabled + vault.required=true，本值留空。
+  #     vault 不可达时拒绝启动（不会走到本值），DB 密码无明文落盘。
+  #   - 允许 vault/env 降级：本值必须为可用密码（明文），或依赖 VMS_DB_PASSWORD
+  #     注入；两者皆缺时 DB 连接失败、启动退出（fail-fast，日志可定位）。
+  # 注意：VMS_DB_PASSWORD 显式置空会被忽略（viper 默认行为），回退到本值。
+  password: ""
   dbname: swnms
   charset: utf8mb4
   max_idle_conns: 10
