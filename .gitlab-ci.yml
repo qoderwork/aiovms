@@ -15,8 +15,8 @@ variables:
 stages:
   - build
   - push
-#  - deploy
-#  - pack
+  - deploy
+  - pack
 #  - scan
 
 build_image_testing:
@@ -103,7 +103,8 @@ deploy_dev:
     - 'echo "deploy on develop server: ${IMAGE_NAME}:${TAG_SLUG}"'
     - 'docker pull ${IMAGE_NAME}:${TAG_SLUG}'
     - 'cd /home/swomc/aio/nms'
-    - 'sh start.sh'
+    #- 'sh start.sh'
+    - 'docker-compose -f data/docker-compose.yml up aiovms -d'
 #    - 'cd /home/swomc/aio/init-server'
 #    - 'docker pull ${INIT_SERVER_IMAGE_NAME}:${TAG}'
 #    - 'sh start.sh'
@@ -116,3 +117,35 @@ deploy_dev:
     - /^hotfix\/.*$/
     - /^develop$/
   allow_failure: true
+
+
+pack_release:
+  stage: pack
+  tags:
+    - ssh-204
+  script:
+    - 'cd /home/swomc/aio/deploy/'
+    - 'echo "pack version is ${TAG_SLUG}"'
+    - 'sh pack.sh ${TAG_SLUG}'
+#    - 'cd /home/swomc/aio/pack/init-server-install/'
+#    - 'sh pack.sh ${TAG}'
+  only:
+    - branches
+  only:
+    - /^release\/.*$/
+    - /^hotfix\/.*$/
+
+pack_tag:
+  stage: pack
+  tags:
+    - ssh-204
+  script:
+    - 'cd /home/swomc/aio/deploy/'
+    - 'echo "pack version is ${TAG}"'
+    - 'sh pack.sh ${TAG}'
+#    - 'cd /home/swomc/aio/pack/init-server-install/'
+#    - 'sh pack.sh ${TAG}'
+  only:
+    - master
+  only:
+    - tags
