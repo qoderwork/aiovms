@@ -11,17 +11,19 @@
 //	    Path:      "secret/data/vms", // KV v2; use "secret/vms" for v1
 //	    KVVersion: 2,
 //	})
-//	secrets, err := client.Read(client.Path())
+//	secrets, err := client.ReadWithRetry(ctx, vault.DefaultRetryBackoff)
 //	if err != nil {
 //	    log.Printf("vault read failed, falling back to config: %v", err)
 //	}
 package vault
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,16 +31,59 @@ import (
 	"time"
 )
 
+// maxBodyBytes caps how much of a Vault response is read into memory,
+// protecting against a misbehaving server or storage backend returning
+// a huge body.
+const maxBodyBytes = 1 << 20 // 1 MiB
+
+// DefaultRetryBackoff retries transient Vault failures (container restart,
+// unseal window, network blips) over roughly one minute: 5 attempts total.
+var DefaultRetryBackoff = []time.Duration{
+	2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second,
+}
+
+// StatusError represents a Vault response with a non-200 HTTP status code.
+type StatusError struct {
+	Code int
+	Msg  string
+}
+
+func (e *StatusError) Error() string { return e.Msg }
+
+// IsRetryable reports whether err is a transient failure worth retrying:
+// network-level errors (connection refused, timeouts) and Vault states
+// that may resolve on their own (sealed, standby, recovery, 5xx).
+// Deterministic failures — bad token (403), bad request (400), not found
+// (404) — are not retried: a second attempt cannot succeed.
+func IsRetryable(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var se *StatusError
+	if errors.As(err, &se) {
+		switch se.Code {
+		case http.StatusTooManyRequests, 472,
+			http.StatusInternalServerError, http.StatusBadGateway,
+			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
+		}
+		return false
+	}
+	// Transport-level errors (DNS, connection refused, timeouts) are
+	// considered transient.
+	return true
+}
+
 // Config holds Vault client connection settings.
 type Config struct {
-	Enabled   bool   `mapstructure:"enabled"`
-	Addr      string `mapstructure:"addr"`       // e.g. "https://vault:8200"
-	Token     string `mapstructure:"token"`     // Vault token (root or scoped)
-	Path      string `mapstructure:"path"`      // secret path, e.g. "secret/data/vms" (v2) or "secret/vms" (v1)
-	KVVersion int    `mapstructure:"kv_version"` // 1 or 2; default 2
-	CABase64  string `mapstructure:"ca_base64"`  // optional: base64-encoded PEM CA cert for HTTPS
-	Insecure  bool   `mapstructure:"insecure"`   // skip TLS verification (dev only)
-	TimeoutSec int   `mapstructure:"timeout_sec"` // HTTP timeout in seconds, default 10
+	Enabled    bool   `mapstructure:"enabled"`
+	Addr       string `mapstructure:"addr"`        // e.g. "https://vault:8200"
+	Token      string `mapstructure:"token"`       // Vault token (root or scoped)
+	Path       string `mapstructure:"path"`        // secret path, e.g. "secret/data/vms" (v2) or "secret/vms" (v1)
+	KVVersion  int    `mapstructure:"kv_version"`  // 1 or 2; default 2
+	CABase64   string `mapstructure:"ca_base64"`   // optional: base64-encoded PEM CA cert for HTTPS
+	Insecure   bool   `mapstructure:"insecure"`    // skip TLS verification (dev only)
+	TimeoutSec int    `mapstructure:"timeout_sec"` // HTTP timeout in seconds, default 10
 }
 
 // Client is a lightweight Vault HTTP API client.
@@ -95,7 +140,7 @@ func NewClient(cfg Config) (*Client, error) {
 
 // Read fetches secrets at the given path. If path is empty, uses cfg.Path.
 // Uses cfg.KVVersion to determine how to parse the response.
-func (c *Client) Read(path string) (map[string]string, error) {
+func (c *Client) Read(ctx context.Context, path string) (map[string]string, error) {
 	if path == "" {
 		path = c.cfg.Path
 	}
@@ -104,7 +149,7 @@ func (c *Client) Read(path string) (map[string]string, error) {
 	}
 
 	url := strings.TrimRight(c.cfg.Addr, "/") + "/v1/" + strings.TrimLeft(path, "/")
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -117,13 +162,16 @@ func (c *Client) Read(path string) (map[string]string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("vault returned %d: %s", resp.StatusCode, truncate(body, 200))
+		return nil, &StatusError{
+			Code: resp.StatusCode,
+			Msg:  fmt.Sprintf("vault returned %d: %s", resp.StatusCode, truncate(body, 200)),
+		}
 	}
 
 	return parseSecretData(body, c.cfg.KVVersion)
@@ -132,8 +180,8 @@ func (c *Client) Read(path string) (map[string]string, error) {
 // ReadField reads a single field from the given path. Returns empty string
 // with no error if the field exists but is empty. Returns an error if the
 // field does not exist.
-func (c *Client) ReadField(path, field string) (string, error) {
-	secrets, err := c.Read(path)
+func (c *Client) ReadField(ctx context.Context, path, field string) (string, error) {
+	secrets, err := c.Read(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -144,11 +192,43 @@ func (c *Client) ReadField(path, field string) (string, error) {
 	return val, nil
 }
 
+// ReadWithRetry performs HealthCheck + Read, retrying transient failures
+// (vault restarting, sealed, standby, network blips) with the given backoff
+// schedule. It returns as soon as both steps succeed; non-retryable errors
+// fail fast; an exhausted schedule returns the last error wrapped with the
+// attempt count. Pass a nil/empty schedule for a single attempt.
+func (c *Client) ReadWithRetry(ctx context.Context, backoff []time.Duration) (map[string]string, error) {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		if lastErr = c.HealthCheck(ctx); lastErr == nil {
+			secrets, err := c.Read(ctx, c.cfg.Path)
+			if err == nil {
+				return secrets, nil
+			}
+			lastErr = fmt.Errorf("vault read %s: %w", c.cfg.Path, err)
+		} else {
+			lastErr = fmt.Errorf("vault health check: %w", lastErr)
+		}
+
+		if !IsRetryable(lastErr) {
+			return nil, lastErr
+		}
+		if attempt >= len(backoff) {
+			return nil, fmt.Errorf("after %d attempts: %w", attempt+1, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff[attempt]):
+		}
+	}
+}
+
 // HealthCheck verifies Vault is reachable and unsealed.
 // Does NOT send the token: sys/health is unauthenticated.
-func (c *Client) HealthCheck() error {
+func (c *Client) HealthCheck(ctx context.Context) error {
 	url := strings.TrimRight(c.cfg.Addr, "/") + "/v1/sys/health"
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -164,13 +244,13 @@ func (c *Client) HealthCheck() error {
 	case http.StatusOK:
 		return nil
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("vault is in standby mode")
+		return &StatusError{Code: resp.StatusCode, Msg: "vault is in standby mode"}
 	case 472:
-		return fmt.Errorf("vault is in recovery mode")
+		return &StatusError{Code: resp.StatusCode, Msg: "vault is in recovery mode"}
 	case http.StatusServiceUnavailable:
-		return fmt.Errorf("vault is sealed")
+		return &StatusError{Code: resp.StatusCode, Msg: "vault is sealed"}
 	default:
-		return fmt.Errorf("vault health check returned %d", resp.StatusCode)
+		return &StatusError{Code: resp.StatusCode, Msg: fmt.Sprintf("vault health check returned %d", resp.StatusCode)}
 	}
 }
 

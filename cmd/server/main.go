@@ -89,14 +89,16 @@ func main() {
 			}
 			logger.Warnf("%s (falling back to config.yaml values)", msg)
 		} else {
-			if err := vaultClient.HealthCheck(); err != nil {
-				msg := fmt.Sprintf("vault health check: %v", err)
-				if cfg.Vault.Required {
-					logger.Fatalf("%s (vault.required=true, refusing to start)", msg)
-				}
-				logger.Warnf("%s (falling back to config.yaml values)", msg)
-			} else if secrets, err := vaultClient.Read(cfg.Vault.Path); err != nil {
-				msg := fmt.Sprintf("vault read %s: %v", cfg.Vault.Path, err)
+			// required=true: retry transient failures (vault restart/unseal
+			// window) before giving up; required=false: single attempt,
+			// fall back to config.yaml fast.
+			var backoff []time.Duration
+			if cfg.Vault.Required {
+				backoff = vault.DefaultRetryBackoff
+			}
+			secrets, err := vaultClient.ReadWithRetry(context.Background(), backoff)
+			if err != nil {
+				msg := fmt.Sprintf("vault: %v", err)
 				if cfg.Vault.Required {
 					logger.Fatalf("%s (vault.required=true, refusing to start)", msg)
 				}
