@@ -36,6 +36,7 @@ type ScheduleRepo interface {
 type RecordingRepo interface {
 	FindActiveSessions() ([]model.RecordingSession, error)
 	FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error)
+	FindActiveManualSessionByCamera(cameraID string) (*model.RecordingSession, error)
 	FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error)
 	CreateSession(sess *model.RecordingSession) error
 	CloseSession(id string, endTime time.Time) error
@@ -402,6 +403,12 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 
 		switch {
 		case inWindow && sch.LastAction != "start":
+			// Schedule has highest priority: close any active manual session
+			// before creating the schedule session to avoid coexistence ambiguity.
+			if manualSess, err := r.recRepo.FindActiveManualSessionByCamera(cam.ID); err == nil && manualSess != nil {
+				_ = r.recRepo.CloseSession(manualSess.ID, now)
+				logger.Infof("reconcile recording: closed manual session %s for camera %s (schedule priority)", manualSess.ID, cam.ID)
+			}
 			// Intent first: enqueue record-on, then persist the session. The
 			// actuator retries until applied, and drift recovery re-applies if
 			// the state is ever lost — so no rollback dance is needed here.

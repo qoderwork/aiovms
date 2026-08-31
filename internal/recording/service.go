@@ -21,7 +21,17 @@ type Service interface {
 	DeleteByCamera(ctx context.Context, tenantID int64, cameraID string) (int, error)
 	StartManual(ctx context.Context, tenantID int64, cameraID string) error
 	StopManual(ctx context.Context, tenantID int64, cameraID string) error
+	// CloseActiveManualSession closes any active manual session for the camera.
+	// Called by the schedule handler when a schedule is created (schedule has
+	// highest priority). No-op if no manual session exists.
+	CloseActiveManualSession(cameraID string) error
 	Upsert(ctx context.Context, rec *model.Recording) error
+}
+
+// ScheduleChecker checks whether a camera currently has an enabled schedule
+// within its recording window. Implemented by schedule.Service.
+type ScheduleChecker interface {
+	IsInWindow(cameraID string, now time.Time) bool
 }
 
 // recordActuator abstracts the MediaMTX actuator (single writer) for
@@ -34,17 +44,18 @@ type recordActuator interface {
 }
 
 type service struct {
-	repo   Repository
-	camSvc CameraService
-	act    recordActuator
+	repo       Repository
+	camSvc     CameraService
+	act        recordActuator
+	schChecker ScheduleChecker
 }
 
 type CameraService interface {
 	Get(ctx context.Context, tenantID int64, id string) (*model.Camera, error)
 }
 
-func NewService(repo Repository, camSvc CameraService, act recordActuator) Service {
-	return &service{repo: repo, camSvc: camSvc, act: act}
+func NewService(repo Repository, camSvc CameraService, act recordActuator, schChecker ScheduleChecker) Service {
+	return &service{repo: repo, camSvc: camSvc, act: act, schChecker: schChecker}
 }
 
 func (s *service) List(ctx context.Context, tenantID int64, cameraID, startTime, endTime string, page, pageSize int) ([]model.Recording, int64, error) {
@@ -141,11 +152,17 @@ func (s *service) StartManual(ctx context.Context, tenantID int64, cameraID stri
 		return err
 	}
 
-	// Close any pre-existing active session for this camera (defensive: should not happen
-	// in normal flow, but guards against duplicate sessions if a previous Stop failed).
-	if existing, err := s.repo.FindActiveSessionByCamera(cameraID); err == nil && existing != nil {
-		logger.Warnf("start manual: found stale active session %s for camera %s, closing", existing.ID, cameraID)
-		_ = s.repo.CloseSession(existing.ID, time.Now())
+	// Schedule has highest priority: if any enabled schedule is currently
+	// in its recording window, reject manual start to avoid session ambiguity.
+	if s.schChecker != nil && s.schChecker.IsInWindow(cameraID, time.Now()) {
+		return apperror.New(40903, 409, "schedule recording in progress, cannot start manual")
+	}
+
+	// Reject duplicate manual start — prevents truncating an existing manual
+	// session. Schedule sessions are left untouched (manual and schedule
+	// sessions can coexist independently).
+	if existing, err := s.repo.FindActiveManualSessionByCamera(cameraID); err == nil && existing != nil {
+		return apperror.New(40902, 409, "camera is already in manual recording")
 	}
 
 	// Intent-commit contract: the session row is the commit point. Create it
@@ -179,22 +196,37 @@ func (s *service) StopManual(ctx context.Context, tenantID int64, cameraID strin
 		return err
 	}
 
-	// Intent-commit contract: closing the session IS the stop. The MediaMTX
-	// apply is enqueued asynchronously; if it cannot be applied right away
-	// (MTX slow/down), orphan repair stops the recording on a later cycle.
-	// The API answer reflects committed intent — MTX slowness no longer
-	// surfaces as a spurious "stop failed" while the stop is converging.
-	sess, sessErr := s.repo.FindActiveSessionByCamera(cameraID)
+	// Only close the manual session — leave schedule sessions untouched so
+	// the reconciler can keep schedule recording alive. If no manual session
+	// exists, return 404 without touching MediaMTX (a schedule session may
+	// still be actively recording).
+	sess, sessErr := s.repo.FindActiveManualSessionByCamera(cameraID)
 	if sessErr == nil && sess != nil {
 		if err := s.repo.CloseSession(sess.ID, time.Now()); err != nil {
 			logger.Errorf("stop manual: close session %s for camera %s: %v", sess.ID, cameraID, err)
 			return apperror.Wrap(err, 50000, 500, "failed to close recording session")
 		}
+		s.act.EnqueueSetRecord(cam.MediaMTXPath, false)
+		return nil
 	}
-	// No active session — MediaMTX may still be recording (e.g. previous stop
-	// crashed after closing the session); enqueue anyway (idempotent).
 
-	s.act.EnqueueSetRecord(cam.MediaMTXPath, false)
+	return apperror.New(40402, 404, "no active manual recording for this camera")
+}
+
+// CloseActiveManualSession closes any active manual session for the camera
+// without touching MediaMTX. Called when a schedule is created (schedule has
+// highest priority). The reconciler will converge MediaMTX state on the next
+// tick. No-op if no manual session exists.
+func (s *service) CloseActiveManualSession(cameraID string) error {
+	sess, err := s.repo.FindActiveManualSessionByCamera(cameraID)
+	if err != nil || sess == nil {
+		return nil
+	}
+	if err := s.repo.CloseSession(sess.ID, time.Now()); err != nil {
+		logger.Errorf("close active manual session: camera %s: %v", cameraID, err)
+		return apperror.Wrap(err, 50000, 500, "failed to close manual session")
+	}
+	logger.Infof("closed active manual session %s for camera %s (schedule priority)", sess.ID, cameraID)
 	return nil
 }
 

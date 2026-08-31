@@ -2,6 +2,8 @@ package schedule
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +19,9 @@ type Service interface {
 	Update(ctx context.Context, tenantID int64, id string, sch *model.RecordSchedule) error
 	Delete(ctx context.Context, tenantID int64, id string) error
 	Toggle(ctx context.Context, tenantID int64, id string) (*model.RecordSchedule, error)
+	// IsInWindow checks whether any enabled schedule for the given camera
+	// is currently within its daily time window and weekday filter.
+	IsInWindow(cameraID string, now time.Time) bool
 }
 
 type service struct {
@@ -105,4 +110,48 @@ func validateTimeRange(start, end string) error {
 		return apperror.ErrInvalidInput.WithMessage("start_time must be earlier than end_time")
 	}
 	return nil
+}
+
+// IsInWindow checks whether any enabled schedule for the given camera
+// is currently within its daily time window and weekday filter.
+// Returns true if at least one schedule matches.
+func (s *service) IsInWindow(cameraID string, now time.Time) bool {
+	schedules, err := s.repo.FindEnabledByCamera(cameraID)
+	if err != nil {
+		return false
+	}
+	weekday := int(now.Weekday())
+	timeStr := now.Format("15:04")
+	for _, sch := range schedules {
+		if !containsWeekday(sch.Weekdays, weekday) {
+			continue
+		}
+		inWindow := true
+		if sch.StartTime != "" && timeStr < sch.StartTime {
+			inWindow = false
+		}
+		if sch.EndTime != "" && timeStr > sch.EndTime {
+			inWindow = false
+		}
+		if inWindow {
+			return true
+		}
+	}
+	return false
+}
+
+func containsWeekday(weekdays string, day int) bool {
+	if weekdays == "" {
+		return false
+	}
+	for _, s := range strings.Split(weekdays, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if s == strconv.Itoa(day) {
+			return true
+		}
+	}
+	return false
 }

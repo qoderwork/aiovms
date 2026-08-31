@@ -119,6 +119,14 @@ func (m *mockRepo) FindActiveSessionByCamera(cameraID string) (*model.RecordingS
 	}
 	return nil, errors.New("not found")
 }
+func (m *mockRepo) FindActiveManualSessionByCamera(cameraID string) (*model.RecordingSession, error) {
+	for i := range m.activeSessions {
+		if m.activeSessions[i].CameraID == cameraID && m.activeSessions[i].TriggerType == "manual" {
+			return &m.activeSessions[i], nil
+		}
+	}
+	return nil, errors.New("not found")
+}
 func (m *mockRepo) FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error) {
 	for i := range m.activeSessions {
 		if m.activeSessions[i].ScheduleID != nil && *m.activeSessions[i].ScheduleID == scheduleID {
@@ -406,8 +414,8 @@ func TestRecordingStopManualIntentCommit(t *testing.T) {
 }
 
 // TestRecordingStopManualNoSessionStillPatches verifies that stopping when no
-// active session exists still patches MediaMTX (idempotent cleanup of a
-// possible orphan recording state).
+// active manual session exists returns 404 and does NOT touch MediaMTX —
+// a schedule session may still be actively recording.
 func TestRecordingStopManualNoSessionStillPatches(t *testing.T) {
 	repo := newMockRepo()
 	camSvc := &mockCameraSvc{
@@ -418,14 +426,11 @@ func TestRecordingStopManualNoSessionStillPatches(t *testing.T) {
 	act := &mockActuator{}
 	svc := &service{repo: repo, camSvc: camSvc, act: act}
 
-	if err := svc.StopManual(context.Background(), 0, "cam-1"); err != nil {
-		t.Fatalf("StopManual: %v", err)
+	if err := svc.StopManual(context.Background(), 0, "cam-1"); err == nil {
+		t.Fatal("expected error for no active manual session, got nil")
 	}
-	if len(act.setRecordCalls) != 1 {
-		t.Fatalf("expected 1 SetRecord call, got %d", len(act.setRecordCalls))
-	}
-	if act.setRecordCalls[0].on {
-		t.Error("expected SetRecord(on=false)")
+	if len(act.setRecordCalls) != 0 {
+		t.Fatalf("expected 0 SetRecord calls, got %d", len(act.setRecordCalls))
 	}
 }
 

@@ -106,7 +106,10 @@ func (m *mockRepo) Delete(id string) error {
 	return nil
 }
 func (m *mockRepo) FindAllEnabled() ([]model.RecordSchedule, error) { return nil, nil }
-func (m *mockRepo) DeleteByCamera(cameraID string) error            { return nil }
+func (m *mockRepo) FindEnabledByCamera(cameraID string) ([]model.RecordSchedule, error) {
+	return nil, nil
+}
+func (m *mockRepo) DeleteByCamera(cameraID string) error { return nil }
 
 func newTestService() (*service, *mockRepo) {
 	repo := newMockRepo()

@@ -213,6 +213,18 @@ func (r *chaosRecRepo) FindActiveSessionByCamera(cameraID string) (*model.Record
 	return nil, errors.New("no active session")
 }
 
+func (r *chaosRecRepo) FindActiveManualSessionByCamera(cameraID string) (*model.RecordingSession, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := len(r.sessions) - 1; i >= 0; i-- {
+		if r.sessions[i].CameraID == cameraID && r.sessions[i].EndTime == nil && r.sessions[i].TriggerType == "manual" {
+			s := r.sessions[i]
+			return &s, nil
+		}
+	}
+	return nil, errors.New("no active manual session")
+}
+
 func (r *chaosRecRepo) FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

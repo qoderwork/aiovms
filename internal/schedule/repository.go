@@ -20,6 +20,7 @@ type Repository interface {
 	// (orphan cleanup), and by camera.Delete for cascade prevention.
 	DeleteByCamera(cameraID string) error
 	FindAllEnabled() ([]model.RecordSchedule, error)
+	FindEnabledByCamera(cameraID string) ([]model.RecordSchedule, error)
 }
 
 type repository struct {
@@ -68,5 +69,11 @@ func (r *repository) DeleteByCamera(cameraID string) error {
 func (r *repository) FindAllEnabled() ([]model.RecordSchedule, error) {
 	var schedules []model.RecordSchedule
 	err := r.db.Where("enabled = ?", true).Find(&schedules).Error
+	return schedules, err
+}
+
+func (r *repository) FindEnabledByCamera(cameraID string) ([]model.RecordSchedule, error) {
+	var schedules []model.RecordSchedule
+	err := r.db.Where("enabled = ? AND camera_id = ?", true, cameraID).Find(&schedules).Error
 	return schedules, err
 }

@@ -203,10 +203,11 @@ func main() {
 	cameraSvc := camera.NewService(camRepo, actuator, mtxClient, cfg.Recording.Path, cfg.Recording.SegmentDuration, hookCommand)
 
 	recRepo := recording.NewRepository(db)
-	recSvc := recording.NewService(recRepo, cameraSvc, actuator)
 
 	schRepo := schedule.NewRepository(db)
 	schSvc := schedule.NewService(schRepo)
+
+	recSvc := recording.NewService(recRepo, cameraSvc, actuator, schSvc)
 
 	// 9. Start unified reconciler (replaces startup sync, cron triggerJob,
 	//    event-driven MTX recovery, and camera status checker).
@@ -301,7 +302,7 @@ func main() {
 	{
 		camera.RegisterRoutes(api, camera.NewHandler(cameraSvc))
 		recording.RegisterRoutes(api, recHandler)
-		schedule.RegisterRoutes(api, schedule.NewHandler(schSvc))
+		schedule.RegisterRoutes(api, schedule.NewHandler(schSvc, recSvc))
 	}
 
 	// 12. Start server with graceful shutdown

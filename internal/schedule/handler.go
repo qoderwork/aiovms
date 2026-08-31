@@ -63,12 +63,20 @@ func (r *UpdateScheduleRequest) toRecordSchedule() model.RecordSchedule {
 	}
 }
 
-type Handler struct {
-	svc Service
+// ManualSessionCloser closes any active manual recording session for a camera.
+// Implemented by recording.Service. Used when a schedule is created to enforce
+// schedule priority (manual session is killed so there is no ambiguity).
+type ManualSessionCloser interface {
+	CloseActiveManualSession(cameraID string) error
 }
 
-func NewHandler(svc Service) *Handler {
-	return &Handler{svc: svc}
+type Handler struct {
+	svc          Service
+	manualCloser ManualSessionCloser
+}
+
+func NewHandler(svc Service, manualCloser ManualSessionCloser) *Handler {
+	return &Handler{svc: svc, manualCloser: manualCloser}
 }
 
 // List godoc
@@ -117,6 +125,12 @@ func (h *Handler) Create(c *gin.Context) {
 	if err := h.svc.Create(c.Request.Context(), &sch); err != nil {
 		utils.HandleError(c, err)
 		return
+	}
+	// Schedule has highest priority: close any active manual session so there
+	// is no ambiguity about which trigger is recording. The reconciler will
+	// converge MediaMTX state on the next tick.
+	if h.manualCloser != nil {
+		_ = h.manualCloser.CloseActiveManualSession(sch.CameraID)
 	}
 	audit.Write(middleware.GetUserID(c), "schedule.create", "schedule", sch.ID,
 		sch.Name+" / camera:"+sch.CameraID, sch.LicenseID)

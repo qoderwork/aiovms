@@ -37,6 +37,7 @@ type Repository interface {
 	CreateSession(sess *model.RecordingSession) error
 	FindActiveSessions() ([]model.RecordingSession, error)
 	FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error)
+	FindActiveManualSessionByCamera(cameraID string) (*model.RecordingSession, error)
 	FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error)
 	CloseSession(id string, endTime time.Time) error
 	// CloseActiveSessionsByCamera sets end_time on all still-open sessions
@@ -203,6 +204,18 @@ func (r *repository) FindActiveSessions() ([]model.RecordingSession, error) {
 func (r *repository) FindActiveSessionByCamera(cameraID string) (*model.RecordingSession, error) {
 	var sess model.RecordingSession
 	err := r.db.Where("camera_id = ? AND end_time IS NULL", cameraID).
+		Order("start_time DESC").First(&sess).Error
+	if err != nil {
+		return nil, err
+	}
+	return &sess, nil
+}
+
+// FindActiveManualSessionByCamera returns the active manual session for a
+// camera, if any. Returns gorm.ErrRecordNotFound if no manual session exists.
+func (r *repository) FindActiveManualSessionByCamera(cameraID string) (*model.RecordingSession, error) {
+	var sess model.RecordingSession
+	err := r.db.Where("camera_id = ? AND end_time IS NULL AND trigger_type = ?", cameraID, "manual").
 		Order("start_time DESC").First(&sess).Error
 	if err != nil {
 		return nil, err

@@ -120,6 +120,15 @@ func (m *mockRecRepo) FindActiveSessionByCamera(cameraID string) (*model.Recordi
 	return nil, errors.New("not found")
 }
 
+func (m *mockRecRepo) FindActiveManualSessionByCamera(cameraID string) (*model.RecordingSession, error) {
+	for i := range m.activeSessions {
+		if m.activeSessions[i].CameraID == cameraID && m.activeSessions[i].TriggerType == "manual" {
+			return &m.activeSessions[i], nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+
 func (m *mockRecRepo) FindActiveSessionBySchedule(scheduleID string) (*model.RecordingSession, error) {
 	if m.findBySchedErr != nil {
 		return nil, m.findBySchedErr
