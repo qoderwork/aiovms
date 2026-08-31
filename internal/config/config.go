@@ -23,15 +23,15 @@ type Config struct {
 // corresponding config.yaml values. If Required is true and Vault is
 // unreachable, the application exits instead of falling back.
 type VaultConfig struct {
-	Enabled   bool   `mapstructure:"enabled"`
-	Required  bool   `mapstructure:"required"`    // if true, vault failure is fatal
-	Addr      string `mapstructure:"addr"`       // e.g. "https://vault:8200"
-	Token     string `mapstructure:"token"`      // VAULT_TOKEN env var
-	Path      string `mapstructure:"path"`       // e.g. "secret/data/vms" (KV v2)
-	KVVersion int    `mapstructure:"kv_version"`  // 1 or 2; default 2
-	CABase64  string `mapstructure:"ca_base64"`   // optional base64 PEM CA cert
-	Insecure  bool   `mapstructure:"insecure"`    // skip TLS verify (dev only)
-	TimeoutSec int   `mapstructure:"timeout_sec"` // HTTP timeout in seconds, default 10
+	Enabled    bool   `mapstructure:"enabled"`
+	Required   bool   `mapstructure:"required"`    // if true, vault failure is fatal
+	Addr       string `mapstructure:"addr"`        // e.g. "https://vault:8200"
+	Token      string `mapstructure:"token"`       // VAULT_TOKEN env var
+	Path       string `mapstructure:"path"`        // e.g. "secret/data/vms" (KV v2)
+	KVVersion  int    `mapstructure:"kv_version"`  // 1 or 2; default 2
+	CABase64   string `mapstructure:"ca_base64"`   // optional base64 PEM CA cert
+	Insecure   bool   `mapstructure:"insecure"`    // skip TLS verify (dev only)
+	TimeoutSec int    `mapstructure:"timeout_sec"` // HTTP timeout in seconds, default 10
 }
 
 type ServerConfig struct {

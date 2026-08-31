@@ -89,9 +89,9 @@ func ParseSegment(filePath string) (*SegmentInfo, error) {
 	// count and duration across all trun boxes, then synthesize a minimal
 	// SegmentInfo for the video track.
 	var (
-		fragByTrack  = map[uint32]*fragAccum{}
-		lastTfhdID   uint32
-		lastTfhdDur  uint32
+		fragByTrack = map[uint32]*fragAccum{}
+		lastTfhdID  uint32
+		lastTfhdDur uint32
 	)
 
 	_, err = mp4.ReadBoxStructure(f, func(h *mp4.ReadHandle) (interface{}, error) {
