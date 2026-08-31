@@ -174,7 +174,7 @@ func (s *service) StartManual(ctx context.Context, tenantID int64, cameraID stri
 	sess := &model.RecordingSession{
 		ID:          uuid.NewString(),
 		CameraID:    cameraID,
-		TriggerType: "manual",
+		TriggerType: model.TriggerManual,
 		StartTime:   now,
 		LicenseID:   cam.LicenseID,
 		CreatedAt:   now,

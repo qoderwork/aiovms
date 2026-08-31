@@ -217,7 +217,7 @@ func (r *chaosRecRepo) FindActiveManualSessionByCamera(cameraID string) (*model.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for i := len(r.sessions) - 1; i >= 0; i-- {
-		if r.sessions[i].CameraID == cameraID && r.sessions[i].EndTime == nil && r.sessions[i].TriggerType == "manual" {
+		if r.sessions[i].CameraID == cameraID && r.sessions[i].EndTime == nil && r.sessions[i].TriggerType == model.TriggerManual {
 			s := r.sessions[i]
 			return &s, nil
 		}
@@ -280,7 +280,7 @@ func startManual(rec *chaosRecRepo, act MTXActuator, cam model.Camera) {
 	_ = rec.CreateSession(&model.RecordingSession{
 		ID:          uuid.NewString(),
 		CameraID:    cam.ID,
-		TriggerType: "manual",
+		TriggerType: model.TriggerManual,
 		StartTime:   time.Now(),
 		LicenseID:   cam.LicenseID,
 	})
@@ -414,7 +414,7 @@ func TestChaos_StartGapHysteresis(t *testing.T) {
 	_ = recRepo.CreateSession(&model.RecordingSession{
 		ID:          uuid.NewString(),
 		CameraID:    cams[0].ID,
-		TriggerType: "manual",
+		TriggerType: model.TriggerManual,
 		StartTime:   time.Now(),
 		LicenseID:   1,
 	})

@@ -215,7 +215,7 @@ func (r *repository) FindActiveSessionByCamera(cameraID string) (*model.Recordin
 // camera, if any. Returns gorm.ErrRecordNotFound if no manual session exists.
 func (r *repository) FindActiveManualSessionByCamera(cameraID string) (*model.RecordingSession, error) {
 	var sess model.RecordingSession
-	err := r.db.Where("camera_id = ? AND end_time IS NULL AND trigger_type = ?", cameraID, "manual").
+	err := r.db.Where("camera_id = ? AND end_time IS NULL AND trigger_type = ?", cameraID, model.TriggerManual).
 		Order("start_time DESC").First(&sess).Error
 	if err != nil {
 		return nil, err

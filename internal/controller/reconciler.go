@@ -228,7 +228,7 @@ func (r *Reconciler) updateRecordingMetrics() {
 	for _, sess := range sessions {
 		counts[sess.TriggerType]++
 	}
-	for _, t := range []string{"manual", "schedule"} {
+	for _, t := range []string{model.TriggerManual, model.TriggerSchedule} {
 		metrics.RecordingActiveSessions.WithLabelValues(t).Set(float64(counts[t]))
 	}
 }
@@ -416,7 +416,7 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 			sess := &model.RecordingSession{
 				ID:          uuid.NewString(),
 				CameraID:    cam.ID,
-				TriggerType: "schedule",
+				TriggerType: model.TriggerSchedule,
 				ScheduleID:  &sch.ID,
 				StartTime:   now,
 				LicenseID:   cam.LicenseID,
@@ -443,7 +443,7 @@ func (r *Reconciler) reconcileRecording(mtxConfigs map[string]mediamtx.PathConfi
 			// Stop recording (unless a manual session is still active)
 			manualActive := false
 			if sess, err := r.recRepo.FindActiveSessionByCamera(sch.CameraID); err == nil && sess != nil {
-				if sess.TriggerType == "manual" {
+				if sess.TriggerType == model.TriggerManual {
 					manualActive = true
 				}
 			}

@@ -122,7 +122,7 @@ func (m *mockRecRepo) FindActiveSessionByCamera(cameraID string) (*model.Recordi
 
 func (m *mockRecRepo) FindActiveManualSessionByCamera(cameraID string) (*model.RecordingSession, error) {
 	for i := range m.activeSessions {
-		if m.activeSessions[i].CameraID == cameraID && m.activeSessions[i].TriggerType == "manual" {
+		if m.activeSessions[i].CameraID == cameraID && m.activeSessions[i].TriggerType == model.TriggerManual {
 			return &m.activeSessions[i], nil
 		}
 	}
@@ -488,7 +488,7 @@ func TestReconcileRecording_ScheduleStart(t *testing.T) {
 	if recRepo.lastCreatedSession == nil {
 		t.Fatal("expected session created")
 	}
-	if recRepo.lastCreatedSession.TriggerType != "schedule" {
+	if recRepo.lastCreatedSession.TriggerType != model.TriggerSchedule {
 		t.Errorf("trigger = %q, want 'schedule'", recRepo.lastCreatedSession.TriggerType)
 	}
 	if recRepo.lastCreatedSession.CameraID != "cam-1" {
@@ -521,7 +521,7 @@ func TestReconcileRecording_ScheduleStop(t *testing.T) {
 	// Active schedule session to close
 	schedIDCopy := schID
 	recRepo.activeSessions = []model.RecordingSession{
-		{ID: "ses-1", CameraID: "cam-1", TriggerType: "schedule", ScheduleID: &schedIDCopy},
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: model.TriggerSchedule, ScheduleID: &schedIDCopy},
 	}
 
 	r.reconcileRecording(emptyPathConfigs())
@@ -562,7 +562,7 @@ func TestReconcileRecording_ScheduleStopSkippedWhenManualActive(t *testing.T) {
 	}
 	// Active manual session for same camera
 	recRepo.activeSessions = []model.RecordingSession{
-		{ID: "ses-manual", CameraID: "cam-1", TriggerType: "manual"},
+		{ID: "ses-manual", CameraID: "cam-1", TriggerType: model.TriggerManual},
 	}
 
 	r.reconcileRecording(emptyPathConfigs())
@@ -606,7 +606,7 @@ func TestReconcileRecording_DriftRecovery(t *testing.T) {
 	}
 	// Active session exists but MTX record=false (drift after MTX restart)
 	recRepo.activeSessions = []model.RecordingSession{
-		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: model.TriggerManual},
 	}
 	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:   "cam-cam-1",
@@ -632,7 +632,7 @@ func TestReconcileRecording_NoDriftWhenAlreadyRecording(t *testing.T) {
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 	}
 	recRepo.activeSessions = []model.RecordingSession{
-		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: model.TriggerManual},
 	}
 	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:   "cam-cam-1",
@@ -694,7 +694,7 @@ func TestReconcileRecording_OrphanNotStoppedWhenSessionActive(t *testing.T) {
 		{ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
 	}
 	recRepo.activeSessions = []model.RecordingSession{
-		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: model.TriggerManual},
 	}
 	reader.pathConfigs["cam-cam-1"] = mediamtx.PathConfigItem{
 		Name:   "cam-cam-1",

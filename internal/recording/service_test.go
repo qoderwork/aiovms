@@ -121,7 +121,7 @@ func (m *mockRepo) FindActiveSessionByCamera(cameraID string) (*model.RecordingS
 }
 func (m *mockRepo) FindActiveManualSessionByCamera(cameraID string) (*model.RecordingSession, error) {
 	for i := range m.activeSessions {
-		if m.activeSessions[i].CameraID == cameraID && m.activeSessions[i].TriggerType == "manual" {
+		if m.activeSessions[i].CameraID == cameraID && m.activeSessions[i].TriggerType == model.TriggerManual {
 			return &m.activeSessions[i], nil
 		}
 	}
@@ -175,6 +175,15 @@ func (m *mockActuator) EnqueueSetRecord(path string, on bool) {
 		path string
 		on   bool
 	}{path, on})
+}
+
+// mockScheduleChecker implements ScheduleChecker for StartManual tests.
+type mockScheduleChecker struct {
+	inWindow bool
+}
+
+func (m *mockScheduleChecker) IsInWindow(cameraID string, now time.Time) bool {
+	return m.inWindow
 }
 
 // --- tests ---
@@ -310,7 +319,7 @@ func TestRecordingStartManual(t *testing.T) {
 	if repo.lastCreatedSession == nil {
 		t.Fatal("expected session created")
 	}
-	if repo.lastCreatedSession.TriggerType != "manual" {
+	if repo.lastCreatedSession.TriggerType != model.TriggerManual {
 		t.Errorf("trigger = %q", repo.lastCreatedSession.TriggerType)
 	}
 	if repo.lastCreatedSession.EndTime != nil {
@@ -353,10 +362,99 @@ func TestRecordingStartManualCrossTenant(t *testing.T) {
 	}
 }
 
+// TestRecordingStartManualRejectScheduleInWindow verifies that manual start
+// is rejected with 40903 when an enabled schedule is currently in its window.
+func TestRecordingStartManualRejectScheduleInWindow(t *testing.T) {
+	repo := newMockRepo()
+	camSvc := &mockCameraSvc{
+		cams: map[string]*model.Camera{
+			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
+		},
+	}
+	act := &mockActuator{}
+	svc := &service{repo: repo, camSvc: camSvc, act: act, schChecker: &mockScheduleChecker{inWindow: true}}
+
+	err := svc.StartManual(context.Background(), 1, "cam-1")
+	if err == nil {
+		t.Fatal("expected schedule-in-window rejection, got nil")
+	}
+	appErr, ok := err.(*apperror.AppError)
+	if !ok || appErr.BizCode != 40903 || appErr.StatusCode != 409 {
+		t.Errorf("expected 40903/409 AppError, got %v", err)
+	}
+	if repo.lastCreatedSession != nil {
+		t.Error("expected no session created when schedule is in window")
+	}
+	if len(act.setRecordCalls) != 0 {
+		t.Errorf("expected no SetRecord call, got %d", len(act.setRecordCalls))
+	}
+}
+
+// TestRecordingStartManualRejectDuplicateManual verifies that a second manual
+// start while a manual session is active is rejected with 40902 and does not
+// truncate the existing session.
+func TestRecordingStartManualRejectDuplicateManual(t *testing.T) {
+	repo := newMockRepo()
+	repo.activeSessions = []model.RecordingSession{
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: model.TriggerManual},
+	}
+	camSvc := &mockCameraSvc{
+		cams: map[string]*model.Camera{
+			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1", LicenseID: 1},
+		},
+	}
+	act := &mockActuator{}
+	svc := &service{repo: repo, camSvc: camSvc, act: act}
+
+	err := svc.StartManual(context.Background(), 1, "cam-1")
+	if err == nil {
+		t.Fatal("expected duplicate manual rejection, got nil")
+	}
+	appErr, ok := err.(*apperror.AppError)
+	if !ok || appErr.BizCode != 40902 || appErr.StatusCode != 409 {
+		t.Errorf("expected 40902/409 AppError, got %v", err)
+	}
+	if repo.lastCreatedSession != nil {
+		t.Error("expected no new session created on duplicate manual")
+	}
+	if len(act.setRecordCalls) != 0 {
+		t.Errorf("expected no SetRecord call, got %d", len(act.setRecordCalls))
+	}
+}
+
+// TestRecordingStopManualScheduleSessionUntouched verifies that StopManual
+// does NOT close a schedule session — it returns 404 and leaves MediaMTX
+// untouched so schedule recording keeps running.
+func TestRecordingStopManualScheduleSessionUntouched(t *testing.T) {
+	schedID := "sched-1"
+	repo := newMockRepo()
+	repo.activeSessions = []model.RecordingSession{
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: model.TriggerSchedule, ScheduleID: &schedID},
+	}
+	camSvc := &mockCameraSvc{
+		cams: map[string]*model.Camera{
+			"cam-1": {ID: "cam-1", MediaMTXPath: "cam-cam-1"},
+		},
+	}
+	act := &mockActuator{}
+	svc := &service{repo: repo, camSvc: camSvc, act: act}
+
+	err := svc.StopManual(context.Background(), 0, "cam-1")
+	if err == nil {
+		t.Fatal("expected 404 for schedule-only session, got nil")
+	}
+	if repo.lastClosedSessionID != "" {
+		t.Errorf("expected no session closed, got %q", repo.lastClosedSessionID)
+	}
+	if len(act.setRecordCalls) != 0 {
+		t.Errorf("expected no SetRecord call, got %d", len(act.setRecordCalls))
+	}
+}
+
 func TestRecordingStopManual(t *testing.T) {
 	repo := newMockRepo()
 	repo.activeSessions = []model.RecordingSession{
-		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: model.TriggerManual},
 	}
 	camSvc := &mockCameraSvc{
 		cams: map[string]*model.Camera{
@@ -390,7 +488,7 @@ func TestRecordingStopManual(t *testing.T) {
 func TestRecordingStopManualIntentCommit(t *testing.T) {
 	repo := newMockRepo()
 	repo.activeSessions = []model.RecordingSession{
-		{ID: "ses-1", CameraID: "cam-1", TriggerType: "manual"},
+		{ID: "ses-1", CameraID: "cam-1", TriggerType: model.TriggerManual},
 	}
 	camSvc := &mockCameraSvc{
 		cams: map[string]*model.Camera{

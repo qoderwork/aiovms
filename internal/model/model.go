@@ -91,6 +91,12 @@ type Recording struct {
 
 func (Recording) TableName() string { return "recordings" }
 
+// RecordingSession.TriggerType 取值。
+const (
+	TriggerManual   = "manual"   // 手动触发录像
+	TriggerSchedule = "schedule" // 计划（schedule）触发录像
+)
+
 // RecordingSession represents a recording intent: one Start → Stop lifecycle.
 // Multiple mp4 segments (Recording rows) produced during the session share the
 // same SessionID. end_time IS NULL means the session is active (currently recording).
